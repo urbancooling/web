@@ -1,7 +1,7 @@
 Webflow.push(function () {
   // GSAP Powered sticky top-of-the-page dynamic banner and hide on scroll down, show on scroll up.
   // This script now also controls an OPTIONAL secondary sticky element: #sticky-filter-wrapper
-  // VERSION: 2.2 (High-performance transform animation for initial load)
+  // VERSION: 2.3 (Forced Hardware Acceleration for maximum smoothness)
 
   let isInitialized = false;
 
@@ -75,10 +75,16 @@ Webflow.push(function () {
         gsap.set(pageContent, { y: -navWrapHeight });
 
         // Step 3: Animate the content down into its final position. This is very performant.
+        // --- NEW: Added force3D for guaranteed hardware acceleration.
         gsap.to(pageContent, { 
             y: 0, 
             duration: 0.7,
-            ease: "power2.out" 
+            ease: "power2.out",
+            force3D: true,
+            onComplete: () => {
+              // --- NEW: Remove will-change after animation to free up resources.
+              pageContent.style.willChange = 'auto';
+            }
         });
 
         isInitialLoad = false; // Ensure this animation only runs once per page load.
@@ -100,6 +106,8 @@ Webflow.push(function () {
       return banner.getBoundingClientRect().height;
     }
     
+    // --- NEW: Prepare the page content for animation with will-change.
+    gsap.set(pageContent, { willChange: 'transform' });
     gsap.set(navwrap, { y: 0 });
 
     // The main function that runs on every animation frame to check scroll position.
@@ -135,7 +143,7 @@ Webflow.push(function () {
         scrollDelta = 0;
         if (bannerHidden) {
             bannerHidden = false;
-            gsap.to(navwrap, { y: 0, duration: 0.3, ease: "power2.inOut" });
+            gsap.to(navwrap, { y: 0, duration: 0.3, ease: "power2.inOut", force3D: true });
             if(filterWrapper){
                 const newTop = navwrap.offsetHeight + STICKY_OFFSET;
                 gsap.to(filterWrapper, { top: newTop, duration: 0.3, ease: "power2.inOut" });
@@ -158,6 +166,7 @@ Webflow.push(function () {
             y: -getBannerHeight(),
             duration: 0.3,
             ease: "power2.inOut",
+            force3D: true,
             onComplete: () => {
               bannerHidden = true;
               isAnimating = false;
@@ -180,6 +189,7 @@ Webflow.push(function () {
             y: 0,
             duration: 0.3,
             ease: "power2.inOut",
+            force3D: true,
             onComplete: () => {
               bannerHidden = false;
               isAnimating = false;
