@@ -1,27 +1,19 @@
 Webflow.push(function () {
   // GSAP Powered sticky top-of-the-page dynamic banner and hide on scroll down, show on scroll up.
   // This script now also controls an OPTIONAL secondary sticky element: #sticky-filter-wrapper
-  // VERSION: 2.7 (Reverted to Instant Snap-in on Load)
+  // VERSION: 2.9 (Refactored to use external utils.js library)
 
   let isInitialized = false;
 
-  function debounce(func, wait) {
-    let timeout;
-    return function executedFunction(...args) {
-      const later = () => {
-        clearTimeout(timeout);
-        func(...args);
-      };
-      clearTimeout(timeout);
-      timeout = setTimeout(later, wait);
-    };
-  }
+  // The 'debounce' function has been removed from this file. 
+  // It is now loaded from your separate 'utils.js' script.
 
   function initNavScroll() {
     if (isInitialized) return;
 
     // ---!! DYNAMIC DEBUGGING CONTROL !!---
-    const isDebugMode = false; // Set to 'true' to show the live debug panel.
+    // The logic to check the URL is now handled by your shared utils.js script.
+    const isDebugMode = window.siteUtils.isDebugMode();
     let debugPanel = null;
     
     // --- Get CORE elements required on every page ---
@@ -45,7 +37,7 @@ Webflow.push(function () {
     }
 
     if (isDebugMode) {
-        console.log("Debug Mode is ON.");
+        console.log("Debug Mode is ON (activated by URL parameter).");
         debugPanel = document.createElement('div');
         debugPanel.id = 'dynamic-debug-panel';
         debugPanel.style.cssText = 'position:fixed; bottom:10px; left:10px; background:rgba(0,0,0,0.7); color:white; padding:10px; border-radius:8px; font-family:monospace; font-size:12px; z-index:9999; line-height:1.5; pointer-events:none;';
@@ -55,7 +47,7 @@ Webflow.push(function () {
 
     const STICKY_OFFSET = 32;
 
-    // --- REVERTED: This function now instantly sets all positions. ---
+    // This function now instantly sets all positions.
     function updatePositions() {
       const navWrapHeight = navwrap.offsetHeight;
 
@@ -65,7 +57,7 @@ Webflow.push(function () {
           filterWrapper.style.top = `${filterStickyTopValue}px`;
       }
 
-      // Instantly set padding on the wrapper to reserve space. This causes the "snap".
+      // Instantly set padding on the wrapper to reserve space.
       pageWrapper.style.paddingTop = `${navWrapHeight}px`;
     }
 
@@ -81,7 +73,6 @@ Webflow.push(function () {
       return banner.getBoundingClientRect().height;
     }
     
-    // No initial state setting needed anymore, page is visible by default.
     gsap.set(navwrap, { y: 0 });
 
     // The main function that runs on every animation frame to check scroll position.
@@ -182,7 +173,8 @@ Webflow.push(function () {
     // Use a small timeout for the initial positioning to ensure the browser has calculated the final layout.
     setTimeout(updatePositions, 100);
 
-    const debouncedUpdate = debounce(updatePositions, 250);
+    // Call the debounce function from the shared utility library.
+    const debouncedUpdate = window.siteUtils.debounce(updatePositions, 250);
     window.addEventListener('resize', debouncedUpdate);
   }
 
