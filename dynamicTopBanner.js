@@ -1,7 +1,7 @@
 Webflow.push(function () {
   // GSAP Powered sticky top-of-the-page dynamic banner and hide on scroll down, show on scroll up.
   // This script now also controls an OPTIONAL secondary sticky element: #sticky-filter-wrapper
-  // VERSION: 2.6 (High-Performance Opacity Transition)
+  // VERSION: 2.7 (Reverted to Instant Snap-in on Load)
 
   let isInitialized = false;
 
@@ -38,9 +38,8 @@ Webflow.push(function () {
     const filterWrapper = document.getElementById("sticky-filter-wrapper");
 
     isInitialized = true;
-    let isInitialLoad = true; 
 
-    console.log("Sticky nav script initialized with opacity transition.");
+    console.log("Sticky nav script initialized. Page will snap into position on load.");
     if(filterWrapper) {
         console.log("Optional sticky filter element found and is being controlled.");
     }
@@ -56,36 +55,18 @@ Webflow.push(function () {
 
     const STICKY_OFFSET = 32;
 
-    // --- UPDATED: This function now uses a high-performance fade-in animation ---
+    // --- REVERTED: This function now instantly sets all positions. ---
     function updatePositions() {
       const navWrapHeight = navwrap.offsetHeight;
 
+      // Instantly set the filter's sticky top position if it exists.
       if (filterWrapper) {
           const filterStickyTopValue = navWrapHeight + STICKY_OFFSET;
           filterWrapper.style.top = `${filterStickyTopValue}px`;
       }
 
-      if (isInitialLoad) {
-        // Step 1: Instantly set padding on the wrapper to reserve space.
-        pageWrapper.style.paddingTop = `${navWrapHeight}px`;
-        
-        // Step 2: Animate the opacity for a smooth fade-in effect.
-        gsap.to(pageWrapper, { 
-            opacity: 1, 
-            duration: 0.8,
-            ease: "power2.out",
-            force3D: true, // Promotes to GPU layer for smoother animation
-            onComplete: () => {
-              // Release GPU resources after animation is done.
-              pageWrapper.style.willChange = 'auto';
-            }
-        });
-
-        isInitialLoad = false;
-      } else {
-        // On resize, update padding instantly.
-        pageWrapper.style.paddingTop = `${navWrapHeight}px`;
-      }
+      // Instantly set padding on the wrapper to reserve space. This causes the "snap".
+      pageWrapper.style.paddingTop = `${navWrapHeight}px`;
     }
 
     // --- State Variables ---
@@ -100,9 +81,7 @@ Webflow.push(function () {
       return banner.getBoundingClientRect().height;
     }
     
-    // --- NEW: Prepare the page wrapper for a high-performance opacity animation ---
-    // Set initial state to invisible and hint to the browser about the upcoming animation.
-    gsap.set(pageWrapper, { opacity: 0, willChange: 'opacity' });
+    // No initial state setting needed anymore, page is visible by default.
     gsap.set(navwrap, { y: 0 });
 
     // The main function that runs on every animation frame to check scroll position.
