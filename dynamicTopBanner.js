@@ -24,7 +24,7 @@ Webflow.push(function () {
     // ---!! DYNAMIC DEBUGGING CONTROL !!---
     // Set this to 'true' to show the live debug panel on the page.
     // Set to 'false' for production to hide it.
-    const isDebugMode = false;
+    const isDebugMode = true;
     let debugPanel = null;
     
     // --- Get CORE elements required on every page ---
@@ -198,7 +198,7 @@ Webflow.push(function () {
     requestAnimationFrame(checkScroll); // Start the main loop.
 
     // Use a small timeout for the initial positioning to ensure the browser has calculated the final layout.
-    setTimeout(updatePositions, 100);
+    setTimeout(updatePositions, 500);
 
     // Update positions on window resize, but debounce it for performance.
     const debouncedUpdate = debounce(updatePositions, 250);
