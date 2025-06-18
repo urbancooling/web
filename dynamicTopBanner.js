@@ -1,7 +1,7 @@
 Webflow.push(function () {
   // GSAP Powered sticky top-of-the-page dynamic banner and hide on scroll down, show on scroll up.
   // This script now also controls an OPTIONAL secondary sticky element: #sticky-filter-wrapper
-  // VERSION: 2.1 (Smooth initial load animation)
+  // VERSION: 2.2 (High-performance transform animation for initial load)
 
   let isInitialized = false;
 
@@ -38,7 +38,6 @@ Webflow.push(function () {
     const filterWrapper = document.getElementById("sticky-filter-wrapper");
 
     isInitialized = true;
-    // --- NEW: Flag for initial load animation ---
     let isInitialLoad = true; 
 
     console.log("Sticky nav script initialized.");
@@ -57,7 +56,7 @@ Webflow.push(function () {
 
     const STICKY_OFFSET = 32;
 
-    // --- UPDATED: This function now animates the page into view on load ---
+    // --- UPDATED: This function now uses a performant transform animation ---
     function updatePositions() {
       const navWrapHeight = navwrap.offsetHeight;
 
@@ -67,17 +66,24 @@ Webflow.push(function () {
           filterWrapper.style.top = `${filterStickyTopValue}px`;
       }
 
-      // On initial load, animate the padding for a smooth entry. On resize, update instantly.
+      // On initial load, animate using transforms for a smooth, high-performance entry.
       if (isInitialLoad) {
+        // Step 1: Instantly set the final padding to reserve the space.
+        gsap.set(pageContent, { paddingTop: `${navWrapHeight}px` });
+        
+        // Step 2: Instantly pull the content up to its pre-padded position.
+        gsap.set(pageContent, { y: -navWrapHeight });
+
+        // Step 3: Animate the content down into its final position. This is very performant.
         gsap.to(pageContent, { 
-            paddingTop: `${navWrapHeight}px`,
-            opacity: 1, // Fade the content in
-            duration: 0.6,
+            y: 0, 
+            duration: 0.7,
             ease: "power2.out" 
         });
-        isInitialLoad = false; // Ensure this animation only runs once
+
+        isInitialLoad = false; // Ensure this animation only runs once per page load.
       } else {
-        // On resize, update instantly without animation for a responsive feel.
+        // On resize, update padding instantly without animation for a responsive feel.
         pageContent.style.paddingTop = `${navWrapHeight}px`;
       }
     }
@@ -94,9 +100,6 @@ Webflow.push(function () {
       return banner.getBoundingClientRect().height;
     }
     
-    // --- NEW: Set initial state of page content for the animation ---
-    // Start with the content invisible. It will be faded in by updatePositions.
-    gsap.set(pageContent, { opacity: 0 });
     gsap.set(navwrap, { y: 0 });
 
     // The main function that runs on every animation frame to check scroll position.
