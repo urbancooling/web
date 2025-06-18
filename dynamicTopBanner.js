@@ -206,7 +206,7 @@ Webflow.push(function () {
     requestAnimationFrame(checkScroll);
 
     // Use a small timeout for the initial positioning to ensure the browser has calculated the final layout.
-    setTimeout(updatePositions, 100);
+    setTimeout(updatePositions, 200);
 
     // Update positions on window resize, but debounce it for performance.
     const debouncedUpdate = debounce(updatePositions, 250);
