@@ -1,7 +1,8 @@
+<script>
 Webflow.push(function () {
   // GSAP Powered sticky top-of-the-page dynamic banner and hide on scroll down, show on scroll up.
   // This script now also controls an OPTIONAL secondary sticky element: #sticky-filter-wrapper
-  // VERSION: 2.3 (Forced Hardware Acceleration for maximum smoothness)
+  // VERSION: 2.5 (Automated Structural Isolation for Ultimate Performance)
 
   let isInitialized = false;
 
@@ -27,20 +28,33 @@ Webflow.push(function () {
     // --- Get CORE elements required on every page ---
     const banner = document.getElementById("top-banner");
     const navwrap = document.getElementById("nav-wrap");
-    const pageContent = document.querySelector(".page_wrapper");
+    const pageWrapper = document.querySelector(".page_wrapper");
 
-    // Abort if core elements are missing.
-    if (!banner || !navwrap || !pageContent) {
+    // Abort if the absolute core elements are missing.
+    if (!banner || !navwrap || !pageWrapper) {
       console.warn("Aborting script: Core elements were not found. (Requires: #top-banner, #nav-wrap, .page_wrapper)");
       return;
     }
     
+    // --- NEW: AUTOMATICALLY CREATE THE ANIMATION WRAPPER ---
+    // This injects the needed <div> so you don't have to edit 80+ pages.
+    const pageAnimator = document.createElement('div');
+    pageAnimator.id = 'page-content-animator';
+
+    // Move all of pageWrapper's children into the new animator div.
+    while (pageWrapper.firstChild) {
+      pageAnimator.appendChild(pageWrapper.firstChild);
+    }
+    // Append the new animator, containing all the content, back into the page wrapper.
+    pageWrapper.appendChild(pageAnimator);
+    // The DOM structure is now optimized for animation on every page automatically.
+
     const filterWrapper = document.getElementById("sticky-filter-wrapper");
 
     isInitialized = true;
     let isInitialLoad = true; 
 
-    console.log("Sticky nav script initialized.");
+    console.log("Sticky nav script initialized. Animation wrapper created dynamically.");
     if(filterWrapper) {
         console.log("Optional sticky filter element found and is being controlled.");
     }
@@ -56,41 +70,37 @@ Webflow.push(function () {
 
     const STICKY_OFFSET = 32;
 
-    // --- UPDATED: This function now uses a performant transform animation ---
+    // --- UPDATED: This function now uses the dynamically created animation structure ---
     function updatePositions() {
       const navWrapHeight = navwrap.offsetHeight;
 
-      // Conditionally set the filter's sticky top position IF it exists on the page.
       if (filterWrapper) {
           const filterStickyTopValue = navWrapHeight + STICKY_OFFSET;
           filterWrapper.style.top = `${filterStickyTopValue}px`;
       }
 
-      // On initial load, animate using transforms for a smooth, high-performance entry.
       if (isInitialLoad) {
-        // Step 1: Instantly set the final padding to reserve the space.
-        gsap.set(pageContent, { paddingTop: `${navWrapHeight}px` });
+        // Step 1: Instantly set padding on the OUTER wrapper to reserve space.
+        pageWrapper.style.paddingTop = `${navWrapHeight}px`;
         
-        // Step 2: Instantly pull the content up to its pre-padded position.
-        gsap.set(pageContent, { y: -navWrapHeight });
+        // Step 2: Instantly pull the INNER animator div up.
+        gsap.set(pageAnimator, { y: -navWrapHeight });
 
-        // Step 3: Animate the content down into its final position. This is very performant.
-        // --- NEW: Added force3D for guaranteed hardware acceleration.
-        gsap.to(pageContent, { 
+        // Step 3: Animate the INNER animator div down.
+        gsap.to(pageAnimator, { 
             y: 0, 
-            duration: 0.7,
-            ease: "power2.out",
+            duration: 0.8,
+            ease: "sine.out",
             force3D: true,
             onComplete: () => {
-              // --- NEW: Remove will-change after animation to free up resources.
-              pageContent.style.willChange = 'auto';
+              pageAnimator.style.willChange = 'auto';
             }
         });
 
-        isInitialLoad = false; // Ensure this animation only runs once per page load.
+        isInitialLoad = false;
       } else {
-        // On resize, update padding instantly without animation for a responsive feel.
-        pageContent.style.paddingTop = `${navWrapHeight}px`;
+        // On resize, update padding instantly.
+        pageWrapper.style.paddingTop = `${navWrapHeight}px`;
       }
     }
 
@@ -106,8 +116,8 @@ Webflow.push(function () {
       return banner.getBoundingClientRect().height;
     }
     
-    // --- NEW: Prepare the page content for animation with will-change.
-    gsap.set(pageContent, { willChange: 'transform' });
+    // Prepare the new animator div for its transform.
+    gsap.set(pageAnimator, { willChange: 'transform' });
     gsap.set(navwrap, { y: 0 });
 
     // The main function that runs on every animation frame to check scroll position.
@@ -208,7 +218,6 @@ Webflow.push(function () {
     // Use a small timeout for the initial positioning to ensure the browser has calculated the final layout.
     setTimeout(updatePositions, 200);
 
-    // Update positions on window resize, but debounce it for performance.
     const debouncedUpdate = debounce(updatePositions, 250);
     window.addEventListener('resize', debouncedUpdate);
   }
@@ -220,3 +229,4 @@ Webflow.push(function () {
     initNavScroll();
   });
 });
+</script>
