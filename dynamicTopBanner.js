@@ -24,7 +24,7 @@ Webflow.push(function () {
     // ---!! DYNAMIC DEBUGGING CONTROL !!---
     // Set this to 'true' to show the live debug panel on the page.
     // Set to 'false' for production to hide it.
-    const isDebugMode = true;
+    const isDebugMode = false;
     let debugPanel = null;
     
     // --- Get CORE elements required on every page ---
