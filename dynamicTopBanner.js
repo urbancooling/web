@@ -1,4 +1,3 @@
-<script>
 Webflow.push(function () {
   // GSAP Powered sticky top-of-the-page dynamic banner and hide on scroll down, show on scroll up.
   // This script now also controls an OPTIONAL secondary sticky element: #sticky-filter-wrapper
@@ -229,4 +228,3 @@ Webflow.push(function () {
     initNavScroll();
   });
 });
-</script>
