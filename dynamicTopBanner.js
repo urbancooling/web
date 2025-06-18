@@ -1,7 +1,7 @@
 Webflow.push(function () {
   // GSAP Powered sticky top-of-the-page dynamic banner and hide on scroll down, show on scroll up.
   // This script now also controls an OPTIONAL secondary sticky element: #sticky-filter-wrapper
-  // VERSION: 2.5 (Automated Structural Isolation for Ultimate Performance)
+  // VERSION: 2.6 (High-Performance Opacity Transition)
 
   let isInitialized = false;
 
@@ -34,26 +34,13 @@ Webflow.push(function () {
       console.warn("Aborting script: Core elements were not found. (Requires: #top-banner, #nav-wrap, .page_wrapper)");
       return;
     }
-    
-    // --- NEW: AUTOMATICALLY CREATE THE ANIMATION WRAPPER ---
-    // This injects the needed <div> so you don't have to edit 80+ pages.
-    const pageAnimator = document.createElement('div');
-    pageAnimator.id = 'page-content-animator';
-
-    // Move all of pageWrapper's children into the new animator div.
-    while (pageWrapper.firstChild) {
-      pageAnimator.appendChild(pageWrapper.firstChild);
-    }
-    // Append the new animator, containing all the content, back into the page wrapper.
-    pageWrapper.appendChild(pageAnimator);
-    // The DOM structure is now optimized for animation on every page automatically.
 
     const filterWrapper = document.getElementById("sticky-filter-wrapper");
 
     isInitialized = true;
     let isInitialLoad = true; 
 
-    console.log("Sticky nav script initialized. Animation wrapper created dynamically.");
+    console.log("Sticky nav script initialized with opacity transition.");
     if(filterWrapper) {
         console.log("Optional sticky filter element found and is being controlled.");
     }
@@ -69,7 +56,7 @@ Webflow.push(function () {
 
     const STICKY_OFFSET = 32;
 
-    // --- UPDATED: This function now uses the dynamically created animation structure ---
+    // --- UPDATED: This function now uses a high-performance fade-in animation ---
     function updatePositions() {
       const navWrapHeight = navwrap.offsetHeight;
 
@@ -79,20 +66,18 @@ Webflow.push(function () {
       }
 
       if (isInitialLoad) {
-        // Step 1: Instantly set padding on the OUTER wrapper to reserve space.
+        // Step 1: Instantly set padding on the wrapper to reserve space.
         pageWrapper.style.paddingTop = `${navWrapHeight}px`;
         
-        // Step 2: Instantly pull the INNER animator div up.
-        gsap.set(pageAnimator, { y: -navWrapHeight });
-
-        // Step 3: Animate the INNER animator div down.
-        gsap.to(pageAnimator, { 
-            y: 0, 
+        // Step 2: Animate the opacity for a smooth fade-in effect.
+        gsap.to(pageWrapper, { 
+            opacity: 1, 
             duration: 0.8,
-            ease: "sine.out",
-            force3D: true,
+            ease: "power2.out",
+            force3D: true, // Promotes to GPU layer for smoother animation
             onComplete: () => {
-              pageAnimator.style.willChange = 'auto';
+              // Release GPU resources after animation is done.
+              pageWrapper.style.willChange = 'auto';
             }
         });
 
@@ -115,8 +100,9 @@ Webflow.push(function () {
       return banner.getBoundingClientRect().height;
     }
     
-    // Prepare the new animator div for its transform.
-    gsap.set(pageAnimator, { willChange: 'transform' });
+    // --- NEW: Prepare the page wrapper for a high-performance opacity animation ---
+    // Set initial state to invisible and hint to the browser about the upcoming animation.
+    gsap.set(pageWrapper, { opacity: 0, willChange: 'opacity' });
     gsap.set(navwrap, { y: 0 });
 
     // The main function that runs on every animation frame to check scroll position.
@@ -215,7 +201,7 @@ Webflow.push(function () {
     requestAnimationFrame(checkScroll);
 
     // Use a small timeout for the initial positioning to ensure the browser has calculated the final layout.
-    setTimeout(updatePositions, 200);
+    setTimeout(updatePositions, 100);
 
     const debouncedUpdate = debounce(updatePositions, 250);
     window.addEventListener('resize', debouncedUpdate);
