@@ -305,6 +305,13 @@
                 // On change
                 checkbox.addEventListener('change', (e) => {
                     applyState(e.target.checked);
+                    // Clear data when a section is toggled OFF
+                    if (!e.target.checked) {
+                        if (checkboxId === 'menu-core-animations') activeAnimations.clear();
+                        else if (checkboxId === 'menu-timelines') activeTimelines.clear();
+                        else if (checkboxId === 'menu-scrolltrigger') activeScrollTriggers.clear();
+                        else if (checkboxId === 'menu-events') Object.keys(eventData).forEach(key => delete eventData[key]);
+                    }
                 });
             };
 
@@ -556,25 +563,35 @@
             });
 
             // Store initial data. `current` will be updated conditionally.
-            activeAnimations.set(tween, {...staticProps, ...cssPropsToMonitor, current: {}});
+            // Add or update the tween in the map if the core animations checkbox is currently checked.
+            // This ensures only relevant data is added to the map.
+            if (debuggerEnabled && ui.menuCoreAnimationsCheckbox.checked) {
+                activeAnimations.set(tween, {...staticProps, ...cssPropsToMonitor, current: {}});
+            }
+
 
             // Attach an onUpdate callback to the tween
             tween.eventCallback('onUpdate', () => {
                 // IMPORTANT: Only process data if debugger is enabled AND the core animations section is visible
                 if (!debuggerEnabled || !ui.menuCoreAnimationsCheckbox.checked) {
-                    // If the section is OFF, clear this tween's data to reduce overhead for hidden sections
-                    // Note: This needs to be activeAnimations.delete(tween) not clear() as clear() clears all.
+                    // If the debugger is enabled but the section is OFF, ensure this specific tween's data is removed.
+                    // This is to prevent stale data from appearing if the section is toggled back ON later.
                     activeAnimations.delete(tween);
-                    return;
+                    return; // Stop processing further for this update cycle
                 }
 
                 const target = tween.targets()[0];
                 if (!target) return;
 
-                const currentProps = activeAnimations.get(tween);
-                if (!currentProps) { // Re-initialize if for some reason it was deleted but still updating
-                     activeAnimations.set(tween, {...staticProps, ...cssPropsToMonitor, current: {}});
-                     return;
+                // Ensure the tween is still in the map before attempting to update it.
+                // It might have been deleted if the checkbox was toggled off and then back on,
+                // and this update is for an older, already running tween.
+                let currentProps = activeAnimations.get(tween);
+                if (!currentProps) {
+                    // If not found, re-initialize it in the map. This covers cases where it was deleted
+                    // due to checkbox toggle, but the animation is still running.
+                    currentProps = {...staticProps, ...cssPropsToMonitor, current: {}};
+                    activeAnimations.set(tween, currentProps);
                 }
 
                 const liveUpdates = {};
@@ -599,8 +616,10 @@
         };
 
         const monitorTimeline = (timeline) => {
-            // Initial data capture for the timeline
-            activeTimelines.set(timeline, {});
+            // Only add to map if the timelines checkbox is currently checked
+            if (debuggerEnabled && ui.menuTimelinesCheckbox.checked) {
+                activeTimelines.set(timeline, {});
+            }
 
             timeline.eventCallback('onUpdate', () => {
                 // IMPORTANT: Only process data if debugger is enabled AND the timelines section is visible
@@ -609,7 +628,13 @@
                     return;
                 }
 
-                const props = {
+                let props = activeTimelines.get(timeline);
+                if (!props) { // Re-initialize if deleted due to toggle
+                    props = {};
+                    activeTimelines.set(timeline, props);
+                }
+
+                Object.assign(props, {
                     status: timeline.paused() ? 'paused' : (timeline.reversed() ? 'reversed' : 'playing'),
                     currentTime: timeline.time().toFixed(2) + 's',
                     timeScale: timeline.timeScale().toFixed(2),
@@ -620,7 +645,7 @@
                         onStart: !!timeline.vars.onStart,
                         onReverseComplete: !!timeline.vars.onReverseComplete
                     }
-                };
+                });
                 activeTimelines.set(timeline, props);
             });
             timeline.eventCallback('onComplete', () => {
@@ -641,16 +666,13 @@
             });
 
             // Re-check periodically for newly created ScrollTriggers
-            // and ensure existing ones are monitored if checkbox is ON
             setInterval(() => {
                 // If section is OFF, clear all ST data and don't process further
-                if (!ui.menuScrollTriggerCheckbox.checked) {
+                if (!debuggerEnabled || !ui.menuScrollTriggerCheckbox.checked) {
                     activeScrollTriggers.clear();
                     return;
                 }
                 ScrollTrigger.getAll().forEach(st => {
-                    // Only monitor if not already tracked (activeScrollTriggers.has(st) check)
-                    // and if section is ON.
                     if (!activeScrollTriggers.has(st)) {
                         monitorScrollTrigger(st);
                     }
@@ -659,22 +681,28 @@
         }
 
         const monitorScrollTrigger = (st) => {
-            // Initial check: if already tracking, or section is off, don't add
-            if (activeScrollTriggers.has(st)) return; // Already tracking
-            if (!ui.menuScrollTriggerCheckbox.checked) { // Don't add if section is off
-                return;
-            }
+            // Initial check: if already tracking, do nothing.
+            // If section is off, don't add to map, but still attach listeners for future state changes.
+            if (activeScrollTriggers.has(st)) return;
 
-            activeScrollTriggers.set(st, {}); // Initialize
+            if (debuggerEnabled && ui.menuScrollTriggerCheckbox.checked) {
+                activeScrollTriggers.set(st, {}); // Initialize if section is ON
+            }
 
             const updateSTProps = (self) => {
                 // IMPORTANT: Only process data if debugger is enabled AND the scrolltrigger section is visible
                 if (!debuggerEnabled || !ui.menuScrollTriggerCheckbox.checked) {
-                    activeScrollTriggers.delete(st);
+                    activeScrollTriggers.delete(st); // Clear this ST's data if section is off
                     return;
                 }
 
-                const props = {
+                let props = activeScrollTriggers.get(st);
+                if (!props) { // Re-initialize if deleted due to toggle
+                    props = {};
+                    activeScrollTriggers.set(st, props);
+                }
+
+                Object.assign(props, {
                     triggerElement: getElementIdentifier(self.trigger),
                     scroller: getElementIdentifier(self.scroller),
                     start: typeof self.start === 'number' ? self.start.toFixed(0) : self.start,
@@ -684,7 +712,7 @@
                     pinState: self.pin ? 'true' : 'false',
                     isActive: self.isActive ? 'true' : 'false',
                     toggleActions: self.vars.toggleActions ? self.vars.toggleActions.split(' ').join(', ') : 'play, none, none, none'
-                };
+                });
                 activeScrollTriggers.set(st, props);
             };
 
@@ -694,12 +722,12 @@
             st.onToggle(self => updateSTProps(self));
             st.onRefresh(self => updateSTProps(self));
 
-            updateSTProps(st); // Initial population of properties
+            updateSTProps(st); // Initial population of properties (conditionally)
         };
 
         // --- Mouse/Event-Related Data ---
         const updateEventData = (type, e) => {
-            // Only collect event data if the events section is checked
+            // Only collect event data if the debugger is enabled AND the events section is checked
             if (!debuggerEnabled || !ui.menuEventsCheckbox.checked) {
                 // If checkbox is unchecked, clear existing event data
                 Object.keys(eventData).forEach(key => delete eventData[key]);
@@ -724,7 +752,7 @@
         });
 
         // --- Update Loop and Keyboard Shortcut ---
-        setInterval(updateDisplay, 100);
+        setInterval(updateDisplay, 100); // UI update frequency
 
         window.addEventListener('keydown', (e) => {
             if (e.key === 'D' && (e.ctrlKey || e.metaKey)) {
