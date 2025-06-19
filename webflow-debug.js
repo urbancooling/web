@@ -2,12 +2,14 @@
 
 /**
  * GSAP Live Animation Debugger/Monitor for Webflow Projects
- * Version: 1.0.19 (Semantic Versioning: MAJOR.MINOR.PATCH)
+ * Version: 1.0.20 (Semantic Versioning: MAJOR.MINOR.PATCH)
  * - Incremented patch for:
- * - CRITICAL FIX: Resolved tracking and interference issues by re-implementing `onUpdate` callbacks on tweens/timelines
- * using `tween.eventCallback()` (which *adds* observers without overwriting user callbacks).
- * - `gsap.ticker.add()` now solely handles the UI update loop, no longer actively polls animations.
- * - This provides the most robust and non-interfering tracking mechanism.
+ * - CRITICAL ARCHITECTURAL FIX: Ensures absolute non-interference AND reliable tracking by:
+ * - REMOVED ALL OVERRIDES for `gsap.to`, `gsap.from`, `gsap.timeline`, etc. The debugger is now a pure observer.
+ * - All animation discovery, live property tracking, and lifecycle management (start/complete) are
+ * handled by a single, optimized `gsap.ticker.add()` polling loop (`tickerUpdate`).
+ * - This completely separates the debugger's operation from the execution flow of user animations.
+ * - Ephemeral Animation Display: Completed animations are buffered and displayed for `COMPLETED_ANIMATION_DISPLAY_DURATION`.
  *
  * This script provides an on-screen overlay debugger to help Webflow developers
  * monitor and troubleshoot GSAP animations and ScrollTrigger states in real-time.
@@ -31,7 +33,7 @@
  */
 (function() {
     // --- Configuration and Persistence ---
-    const DEBUGGER_VERSION = "1.0.19"; // Updated debugger version constant
+    const DEBUGGER_VERSION = "1.0.20"; // Updated debugger version constant
     const DEBUGGER_PARAM = 'debug';
     const LOCAL_STORAGE_KEY = 'gsapDebuggerEnabled';
     const COMPLETED_ANIMATION_DISPLAY_DURATION = 3000; // Milliseconds to display completed animations
