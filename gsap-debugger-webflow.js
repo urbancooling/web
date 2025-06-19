@@ -2,9 +2,9 @@
 
 /**
  * GSAP Live Animation Debugger/Monitor for Webflow Projects
- * Version: 1.0.6 (Semantic Versioning: MAJOR.MINOR.PATCH)
+ * Version: 1.0.8 (Semantic Versioning: MAJOR.MINOR.PATCH)
  * - Incremented patch for:
- * - Renaming URL parameter from '?gsapdbug' to '?debug' for universal debugger control.
+ * - Reloading the page and stripping out debugger-related URL queries when the debugger is turned OFF from the overlay.
  *
  * This script provides an on-screen overlay debugger to help Webflow developers
  * monitor and troubleshoot GSAP animations and ScrollTrigger states in real-time.
@@ -28,18 +28,15 @@
  */
 (function() {
     // --- Configuration and Persistence ---
-    const DEBUGGER_VERSION = "1.0.6"; // Updated debugger version constant
-    // Changed URL parameter from 'gsapdbug' to 'debug' for universal control
+    const DEBUGGER_VERSION = "1.0.8"; // Updated debugger version constant
     const DEBUGGER_PARAM = 'debug';
-    const LOCAL_STORAGE_KEY = 'gsapDebuggerEnabled'; // This key remains specific to the GSAP debugger
+    const LOCAL_STORAGE_KEY = 'gsapDebuggerEnabled';
 
     let debuggerEnabled = localStorage.getItem(LOCAL_STORAGE_KEY) === 'true';
 
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.has(DEBUGGER_PARAM)) {
         debuggerEnabled = urlParams.get(DEBUGGER_PARAM) === 'true';
-        // Note: The GSAP debugger's enabled state is still stored under its own key.
-        // Other scripts will check the 'debug' URL param or a new shared utility.
         localStorage.setItem(LOCAL_STORAGE_KEY, debuggerEnabled);
     }
 
@@ -129,6 +126,19 @@
                 align-items: center !important;
                 margin-bottom: 8px !important;
                 cursor: pointer !important;
+                color: #bbb !important; /* Default greyed out color for labels */
+                transition: color 0.2s !important;
+            }
+            #gsap-debugger-overlay label.active-menu-item {
+                color: #00ff00 !important; /* Bright green for active labels */
+            }
+            #gsap-debugger-overlay label .status-text {
+                font-size: 10px !important;
+                margin-left: 5px !important;
+                color: #777 !important; /* Default for status text */
+            }
+            #gsap-debugger-overlay label.active-menu-item .status-text {
+                color: #00ff00 !important; /* Bright green for active status text */
             }
             #gsap-debugger-overlay input[type="checkbox"] {
                 margin-right: 8px !important;
@@ -171,20 +181,20 @@
                     <hr>
 
                     <div id="gsap-debugger-menu">
-                        <label>
-                            <input type="checkbox" id="menu-core-animations" checked> Core Animations
+                        <label id="label-core-animations">
+                            <input type="checkbox" id="menu-core-animations" checked> Core Animations <span class="status-text"></span>
                         </label>
-                        <label>
-                            <input type="checkbox" id="menu-timelines" checked> Timelines
+                        <label id="label-timelines">
+                            <input type="checkbox" id="menu-timelines" checked> Timelines <span class="status-text"></span>
                         </label>
-                        <label>
-                            <input type="checkbox" id="menu-scrolltrigger" checked> ScrollTrigger
+                        <label id="label-scrolltrigger">
+                            <input type="checkbox" id="menu-scrolltrigger" checked> ScrollTrigger <span class="status-text"></span>
                         </label>
-                        <label>
-                            <input type="checkbox" id="menu-events"> Events
+                        <label id="label-events">
+                            <input type="checkbox" id="menu-events"> Events <span class="status-text"></span>
                         </label>
-                        <label>
-                            <input type="checkbox" id="menu-marker-overlay"> ST Markers (Built-in)
+                        <label id="label-marker-overlay">
+                            <input type="checkbox" id="menu-marker-overlay"> ST Markers (Built-in) <span class="status-text"></span>
                         </label>
                     </div>
 
@@ -197,8 +207,8 @@
             document.body.appendChild(debuggerContainer);
 
             const toggleButton = debuggerContainer.querySelector('#gsap-debugger-toggle');
-            const debuggerContent = debuggerContainer.querySelector('#gsap-debugger-content');
 
+            // Function to update the visual state of the toggle button and debugger visibility
             const updateToggleButton = () => {
                 if (debuggerEnabled) {
                     toggleButton.textContent = 'ON';
@@ -209,62 +219,99 @@
                     toggleButton.textContent = 'OFF';
                     toggleButton.classList.remove('on');
                     toggleButton.classList.add('off');
-                    debuggerContainer.style.display = 'none';
+                    // Special behavior for turning OFF: Reload and clean URL
+                    const currentUrl = new URL(window.location.href);
+                    currentUrl.searchParams.delete(DEBUGGER_PARAM); // Remove the '?debug' parameter
+
+                    // If other query parameters exist, the '?debug' parameter removal will be sufficient.
+                    // If no other query parameters exist, currentUrl.search will become empty,
+                    // effectively cleaning up the '?' as well.
+                    window.location.replace(currentUrl.toString());
                 }
             };
 
             toggleButton.addEventListener('click', () => {
                 debuggerEnabled = !debuggerEnabled;
                 localStorage.setItem(LOCAL_STORAGE_KEY, debuggerEnabled);
-                updateToggleButton();
-                if (!debuggerEnabled) {
-                    activeAnimations.clear();
-                    activeTimelines.clear();
-                    activeScrollTriggers.clear();
-                    Object.keys(eventData).forEach(key => delete eventData[key]);
-                }
+                updateToggleButton(); // This call will now trigger the reload if turning off
+                // No need for separate hide logic here, as reload handles it
             });
 
-            updateToggleButton();
+            updateToggleButton(); // Initial call to set the correct state and display
 
             const animationDiv = debuggerContainer.querySelector('#gsap-debugger-animations');
             const timelineDiv = debuggerContainer.querySelector('#gsap-debugger-timelines');
             const scrollTriggerDiv = debuggerContainer.querySelector('#gsap-debugger-scrolltriggers');
             const eventsDiv = debuggerContainer.querySelector('#gsap-debugger-events');
 
-            debuggerContainer.querySelector('#menu-core-animations').addEventListener('change', (e) => {
-                animationDiv.style.display = e.target.checked ? 'block' : 'none';
-            });
-            debuggerContainer.querySelector('#menu-timelines').addEventListener('change', (e) => {
-                timelineDiv.style.display = e.target.checked ? 'block' : 'none';
-            });
-            debuggerContainer.querySelector('#menu-scrolltrigger').addEventListener('change', (e) => {
-                scrollTriggerDiv.style.display = e.target.checked ? 'block' : 'none';
-            });
-            debuggerContainer.querySelector('#menu-events').addEventListener('change', (e) => {
-                eventsDiv.style.display = e.target.checked ? 'block' : 'none';
-            });
+            // Function to update menu item visual state
+            const updateMenuItem = (checkboxId, sectionDiv, labelId) => {
+                const checkbox = debuggerContainer.querySelector(`#${checkboxId}`);
+                const label = debuggerContainer.querySelector(`#${labelId}`);
+                const statusText = label.querySelector('.status-text');
+
+                const applyState = (checked) => {
+                    if (checked) {
+                        label.classList.add('active-menu-item');
+                        statusText.textContent = '(ON)';
+                        sectionDiv.style.display = 'block';
+                    } else {
+                        label.classList.remove('active-menu-item');
+                        statusText.textContent = '(OFF)';
+                        sectionDiv.style.display = 'none';
+                    }
+                };
+
+                // Initial state
+                applyState(checkbox.checked);
+
+                // On change
+                checkbox.addEventListener('change', (e) => {
+                    applyState(e.target.checked);
+                });
+            };
+
+            // Initialize all menu items
+            updateMenuItem('menu-core-animations', animationDiv, 'label-core-animations');
+            updateMenuItem('menu-timelines', timelineDiv, 'label-timelines');
+            updateMenuItem('menu-scrolltrigger', scrollTriggerDiv, 'label-scrolltrigger');
+            updateMenuItem('menu-events', eventsDiv, 'label-events');
 
             const stMarkerCheckbox = debuggerContainer.querySelector('#menu-marker-overlay');
+            const stMarkerLabel = debuggerContainer.querySelector('#label-marker-overlay');
+            const stMarkerStatusText = stMarkerLabel.querySelector('.status-text');
+
             if (scrollTriggerAvailable) {
-                stMarkerCheckbox.addEventListener('change', (e) => {
-                    if (e.target.checked) {
+                const applySTMarkerState = (checked) => {
+                    if (checked) {
+                        stMarkerLabel.classList.add('active-menu-item');
+                        stMarkerStatusText.textContent = '(ON)';
                         ScrollTrigger.defaults({markers: true});
                         ScrollTrigger.refresh();
                         document.querySelectorAll('.gsap-marker-scroller-start, .gsap-marker-scroller-end, .gsap-marker-start, .gsap-marker-end').forEach(marker => {
                             marker.style.display = 'block';
                         });
                     } else {
+                        stMarkerLabel.classList.remove('active-menu-item');
+                        stMarkerStatusText.textContent = '(OFF)';
                         ScrollTrigger.defaults({markers: false});
                         document.querySelectorAll('.gsap-marker-scroller-start, .gsap-marker-scroller-end, .gsap-marker-start, .gsap-marker-end').forEach(marker => {
                             marker.style.display = 'none';
                         });
                     }
+                };
+
+                applySTMarkerState(stMarkerCheckbox.checked); // Initial state for markers
+
+                stMarkerCheckbox.addEventListener('change', (e) => {
+                    applySTMarkerState(e.target.checked);
                 });
             } else {
                 stMarkerCheckbox.disabled = true;
-                stMarkerCheckbox.parentElement.title = 'ScrollTrigger not available';
+                stMarkerLabel.parentElement.title = 'ScrollTrigger not available';
+                stMarkerStatusText.textContent = '(N/A)';
             }
+
 
             return {
                 debuggerContainer,
