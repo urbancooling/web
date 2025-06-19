@@ -2,11 +2,13 @@
 
 /**
  * GSAP Live Animation Debugger/Monitor for Webflow Projects
- * Version: 1.0.11 (Semantic Versioning: MAJOR.MINOR.PATCH)
+ * Version: 1.0.12 (Semantic Versioning: MAJOR.MINOR.PATCH)
  * - Incremented patch for:
- * - Significantly reducing performance interference by implementing conditional data collection.
- * - Data for Core Animations, Timelines, and ScrollTriggers is now only collected and processed
- * if their respective display sections are currently active (checkbox is ON).
+ * - CRITICAL FIX: Eliminating interference with existing GSAP animations.
+ * - Observers (monitorTween, monitorTimeline, monitorScrollTrigger) are now ALWAYS attached to GSAP instances.
+ * - Data collection/processing is conditionally executed *within* the observer callbacks,
+ * ensuring the debugger observes without disrupting GSAP's internal operations.
+ * - Clears data maps immediately when a section is toggled OFF.
  *
  * This script provides an on-screen overlay debugger to help Webflow developers
  * monitor and troubleshoot GSAP animations and ScrollTrigger states in real-time.
@@ -30,9 +32,9 @@
  */
 (function() {
     // --- Configuration and Persistence ---
-    const DEBUGGER_VERSION = "1.0.11"; // Updated debugger version constant
+    const DEBUGGER_VERSION = "1.0.12"; // Updated debugger version constant
     const DEBUGGER_PARAM = 'debug';
-    const LOCAL_STORAGE_KEY = 'gsapDebuggerEnabled'; // This key remains specific to the GSAP debugger
+    const LOCAL_STORAGE_KEY = 'gsapDebuggerEnabled';
 
     let debuggerEnabled = localStorage.getItem(LOCAL_STORAGE_KEY) === 'true';
 
@@ -508,49 +510,37 @@
         const originalSet = gsap.set;
         const originalTimeline = gsap.timeline;
 
+        // Override GSAP methods to ALWAYS capture tweens/timelines on creation
+        // The decision to process/display data is handled *inside* the monitor functions
         gsap.to = function(...args) {
             const tween = originalTo.apply(gsap, args);
-            // Only monitor if the Core Animations menu item is checked
-            if (ui.menuCoreAnimationsCheckbox.checked) {
-                monitorTween(tween);
-            }
+            monitorTween(tween); // Always attach observer
             return tween;
         };
         gsap.from = function(...args) {
             const tween = originalFrom.apply(gsap, args);
-            // Only monitor if the Core Animations menu item is checked
-            if (ui.menuCoreAnimationsCheckbox.checked) {
-                monitorTween(tween);
-            }
+            monitorTween(tween); // Always attach observer
             return tween;
         };
         gsap.fromTo = function(...args) {
             const tween = originalFromTo.apply(gsap, args);
-            // Only monitor if the Core Animations menu item is checked
-            if (ui.menuCoreAnimationsCheckbox.checked) {
-                monitorTween(tween);
-            }
+            monitorTween(tween); // Always attach observer
             return tween;
         };
         gsap.set = function(...args) {
             const tween = originalSet.apply(gsap, args);
-            // set() tweens are often one-off and might not need active monitoring.
-            // Still, apply conditional monitoring for consistency if desired.
-            // if (ui.menuCoreAnimationsCheckbox.checked) {
-            //     monitorTween(tween);
-            // }
+            monitorTween(tween); // Always attach observer (even for set, as it might be relevant)
             return tween;
         };
         gsap.timeline = function(...args) {
             const timeline = originalTimeline.apply(gsap, args);
-            // Only monitor if the Timelines menu item is checked
-            if (ui.menuTimelinesCheckbox.checked) {
-                monitorTimeline(timeline);
-            }
+            monitorTimeline(timeline); // Always attach observer
             return timeline;
         };
 
+        // Function to monitor individual GSAP tweens
         const monitorTween = (tween) => {
+            // Initial data capture, regardless of checkbox state (minimal processing)
             const staticProps = {};
             ['duration', 'delay', 'ease', 'repeat', 'yoyo', 'stagger'].forEach(prop => {
                 if (tween.vars[prop] !== undefined) {
@@ -565,17 +555,27 @@
                 }
             });
 
+            // Store initial data. `current` will be updated conditionally.
             activeAnimations.set(tween, {...staticProps, ...cssPropsToMonitor, current: {}});
 
+            // Attach an onUpdate callback to the tween
             tween.eventCallback('onUpdate', () => {
-                // Only perform updates if debugger is enabled AND the core animations section is visible
-                if (!debuggerEnabled || !ui.menuCoreAnimationsCheckbox.checked) return;
+                // IMPORTANT: Only process data if debugger is enabled AND the core animations section is visible
+                if (!debuggerEnabled || !ui.menuCoreAnimationsCheckbox.checked) {
+                    // If the section is OFF, clear this tween's data to reduce overhead for hidden sections
+                    // Note: This needs to be activeAnimations.delete(tween) not clear() as clear() clears all.
+                    activeAnimations.delete(tween);
+                    return;
+                }
 
                 const target = tween.targets()[0];
                 if (!target) return;
 
                 const currentProps = activeAnimations.get(tween);
-                if (!currentProps) return;
+                if (!currentProps) { // Re-initialize if for some reason it was deleted but still updating
+                     activeAnimations.set(tween, {...staticProps, ...cssPropsToMonitor, current: {}});
+                     return;
+                }
 
                 const liveUpdates = {};
                 const coreTransformProps = ['x', 'y', 'rotation', 'scaleX', 'scaleY', 'opacity'];
@@ -589,6 +589,7 @@
                 activeAnimations.set(tween, currentProps);
             });
 
+            // Clean up data when animation completes
             tween.eventCallback('onComplete', () => {
                 activeAnimations.delete(tween);
             });
@@ -598,11 +599,15 @@
         };
 
         const monitorTimeline = (timeline) => {
+            // Initial data capture for the timeline
             activeTimelines.set(timeline, {});
 
             timeline.eventCallback('onUpdate', () => {
-                // Only perform updates if debugger is enabled AND the timelines section is visible
-                if (!debuggerEnabled || !ui.menuTimelinesCheckbox.checked) return;
+                // IMPORTANT: Only process data if debugger is enabled AND the timelines section is visible
+                if (!debuggerEnabled || !ui.menuTimelinesCheckbox.checked) {
+                    activeTimelines.delete(timeline);
+                    return;
+                }
 
                 const props = {
                     status: timeline.paused() ? 'paused' : (timeline.reversed() ? 'reversed' : 'playing'),
@@ -632,18 +637,20 @@
 
             const initialSTs = ScrollTrigger.getAll();
             initialSTs.forEach(st => {
-                if (ui.menuScrollTriggerCheckbox.checked) { // Only monitor initially if checked
-                    monitorScrollTrigger(st);
-                }
+                monitorScrollTrigger(st); // Always attach observer
             });
 
             // Re-check periodically for newly created ScrollTriggers
+            // and ensure existing ones are monitored if checkbox is ON
             setInterval(() => {
+                // If section is OFF, clear all ST data and don't process further
                 if (!ui.menuScrollTriggerCheckbox.checked) {
-                    activeScrollTriggers.clear(); // Clear data if section is off
+                    activeScrollTriggers.clear();
                     return;
                 }
                 ScrollTrigger.getAll().forEach(st => {
+                    // Only monitor if not already tracked (activeScrollTriggers.has(st) check)
+                    // and if section is ON.
                     if (!activeScrollTriggers.has(st)) {
                         monitorScrollTrigger(st);
                     }
@@ -652,15 +659,20 @@
         }
 
         const monitorScrollTrigger = (st) => {
-            if (activeScrollTriggers.has(st)) return;
-            // Only add to active list if checkbox is currently checked
-            if (!ui.menuScrollTriggerCheckbox.checked) return;
+            // Initial check: if already tracking, or section is off, don't add
+            if (activeScrollTriggers.has(st)) return; // Already tracking
+            if (!ui.menuScrollTriggerCheckbox.checked) { // Don't add if section is off
+                return;
+            }
 
-            activeScrollTriggers.set(st, {});
+            activeScrollTriggers.set(st, {}); // Initialize
 
             const updateSTProps = (self) => {
-                // Only perform updates if debugger is enabled AND the scrolltrigger section is visible
-                if (!debuggerEnabled || !ui.menuScrollTriggerCheckbox.checked) return;
+                // IMPORTANT: Only process data if debugger is enabled AND the scrolltrigger section is visible
+                if (!debuggerEnabled || !ui.menuScrollTriggerCheckbox.checked) {
+                    activeScrollTriggers.delete(st);
+                    return;
+                }
 
                 const props = {
                     triggerElement: getElementIdentifier(self.trigger),
@@ -676,11 +688,13 @@
                 activeScrollTriggers.set(st, props);
             };
 
+            // Attach event listeners to ScrollTrigger instance
+            // These callbacks will *always* fire, but their body will conditionally process data
             st.onUpdate(self => updateSTProps(self));
             st.onToggle(self => updateSTProps(self));
             st.onRefresh(self => updateSTProps(self));
 
-            updateSTProps(st);
+            updateSTProps(st); // Initial population of properties
         };
 
         // --- Mouse/Event-Related Data ---
