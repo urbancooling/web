@@ -18,7 +18,7 @@ window.siteUtils.debounce = function(func, wait) {
 // Shared Debug Mode checker
 window.siteUtils.isDebugMode = function() {
   const urlParams = new URLSearchParams(window.location.search);
-  return urlParams.get('dbug') === 'true';
+  return urlParams.get('debug') === 'true'; // <-- NOW CHECKS FOR '?debug=true'
 };
 
 // You can add more utilities here in the future
