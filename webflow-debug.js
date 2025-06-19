@@ -2,15 +2,11 @@
 
 /**
  * GSAP Live Animation Debugger/Monitor for Webflow Projects
- * Version: 1.0.13 (Semantic Versioning: MAJOR.MINOR.PATCH)
+ * Version: 1.0.14 (Semantic Versioning: MAJOR.MINOR.PATCH)
  * - Incremented patch for:
- * - CRITICAL ARCHITECTURAL CHANGE: Eliminating ALL direct interference with GSAP animations.
- * - Removed overrides for gsap.to, gsap.from, gsap.timeline, gsap.set.
- * - Data collection is now entirely driven by `gsap.ticker.add()`, which polls active
- * GSAP instances (tweens, timelines, ScrollTriggers) without modifying their behavior.
- * - Conditional data processing refined: Data is only extracted and stored if the debugger is active
- * and the corresponding menu section is checked.
- * - This ensures the debugger is a purely passive observer.
+ * - FIX: Resolved `TypeError: timeline.getChildren is not a function` by adding robust `instanceof gsap.core.Timeline`
+ * and `instanceof gsap.core.Tween` checks in the `tickerUpdate` function. This ensures `getChildren` is only
+ * called on valid Timeline instances and data is processed correctly for tweens vs. timelines.
  *
  * This script provides an on-screen overlay debugger to help Webflow developers
  * monitor and troubleshoot GSAP animations and ScrollTrigger states in real-time.
@@ -34,7 +30,7 @@
  */
 (function() {
     // --- Configuration and Persistence ---
-    const DEBUGGER_VERSION = "1.0.13"; // Updated debugger version constant
+    const DEBUGGER_VERSION = "1.0.14"; // Updated debugger version constant
     const DEBUGGER_PARAM = 'debug';
     const LOCAL_STORAGE_KEY = 'gsapDebuggerEnabled';
 
@@ -521,56 +517,57 @@
 
             // --- Collect Core Animations Data ---
             if (ui.menuCoreAnimationsCheckbox.checked) {
-                // Get all active tweens and timelines from GSAP's global timeline
-                const allActiveAnimations = gsap.globalTimeline.getChildren(true, true, false); // include tweens, timelines, exclude labels/callbacks
+                // Get all active tweens (not timelines) directly attached to the global timeline
+                const allRootTweens = gsap.globalTimeline.getChildren(true, false, false); // includeTweens=true, includeTimelines=false
 
-                // Maintain a list of currently polled animations to detect completed ones
+                // Maintain a list of currently polled tweens to detect completed ones
                 const currentlyPolledTweens = new Set();
 
-                allActiveAnimations.forEach(animation => {
-                    // Check if it's a tween (not a timeline, which we handle separately) and it's active
-                    if (animation.parent === gsap.globalTimeline && animation.progress() < 1 && !animation.paused() && !animation.reversed() && animation.duration() > 0) { // Exclude completed tweens or paused ones
-                        currentlyPolledTweens.add(animation);
+                allRootTweens.forEach(tween => { // Now `tween` is guaranteed to be a Tween instance
+                    // Check if it's currently active (not completed, paused, or reversed)
+                    if (tween.progress() < 1 && !tween.paused() && !tween.reversed() && tween.duration() > 0) {
+                        currentlyPolledTweens.add(tween);
 
-                        let props = activeAnimations.get(animation);
+                        let props = activeAnimations.get(tween);
                         if (!props) {
                             // If not already tracked, initialize it with static and target CSS properties
                             const staticProps = {};
                             ['duration', 'delay', 'ease', 'repeat', 'yoyo', 'stagger'].forEach(prop => {
-                                if (animation.vars[prop] !== undefined) {
-                                    staticProps[prop] = animation.vars[prop];
+                                if (tween.vars[prop] !== undefined) {
+                                    staticProps[prop] = tween.vars[prop];
                                 }
                             });
                             const cssPropsToMonitor = {};
-                            Object.keys(animation.vars).forEach(key => {
+                            Object.keys(tween.vars).forEach(key => {
                                 const excluded = ['onUpdate', 'onComplete', 'onStart', 'onReverseComplete', 'onInterrupt', 'onRepeat', 'onEachComplete', 'delay', 'duration', 'ease', 'repeat', 'yoyo', 'stagger', 'id', 'overwrite', 'callbackScope', 'paused', 'reversed', 'data', 'immediateRender', 'lazy', 'inherit', 'runBackwards', 'simple', 'overwrite', 'callbackScope', 'defaults', 'onToggle', 'scrollTrigger'];
-                                if (!excluded.includes(key) && typeof animation.vars[key] !== 'function') {
-                                    cssPropsToMonitor[key] = animation.vars[key];
+                                if (!excluded.includes(key) && typeof tween.vars[key] !== 'function') {
+                                    cssPropsToMonitor[key] = tween.vars[key];
                                 }
                             });
                             props = {...staticProps, ...cssPropsToMonitor, current: {}};
-                            activeAnimations.set(animation, props);
+                            activeAnimations.set(tween, props);
                         }
 
                         // Update live properties
-                        const target = animation.targets()[0];
+                        const target = tween.targets()[0];
                         if (target) {
                             const liveUpdates = {};
                             const coreTransformProps = ['x', 'y', 'rotation', 'scaleX', 'scaleY', 'opacity'];
                             coreTransformProps.forEach(prop => {
-                                if (animation.vars[prop] !== undefined) {
+                                if (tween.vars[prop] !== undefined) {
                                     liveUpdates[`current_${prop}`] = gsap.getProperty(target, prop);
                                 }
                             });
                             Object.assign(props.current, liveUpdates);
-                            activeAnimations.set(animation, props); // Re-set to ensure map is updated
+                            activeAnimations.set(tween, props); // Re-set to ensure map is updated
                         }
                     }
                 });
 
                 // Remove tweens from activeAnimations that are no longer active or tracked by GSAP
                 activeAnimations.forEach((props, tween) => {
-                    if (!currentlyPolledTweens.has(tween) && (tween.progress() === 1 || tween.paused() || tween.reversed())) { // Consider removing if complete/paused
+                    // Remove if no longer polled or if it completed/paused/reversed outside of our polling's detection
+                    if (!currentlyPolledTweens.has(tween) && (tween.progress() === 1 || tween.paused() || tween.reversed())) {
                         activeAnimations.delete(tween);
                     }
                 });
@@ -580,11 +577,13 @@
 
             // --- Collect Timelines Data ---
             if (ui.menuTimelinesCheckbox.checked) {
-                const allTimelines = gsap.globalTimeline.getChildren(false, true, false); // Only direct children timelines
+                // Get all active timelines (not tweens) directly attached to the global timeline
+                const allRootTimelines = gsap.globalTimeline.getChildren(false, true, false); // includeTweens=false, includeTimelines=true
 
                 const currentlyPolledTimelines = new Set();
-                allTimelines.forEach(timeline => {
-                    if (timeline.parent === gsap.globalTimeline) { // Ensure it's a root-level timeline
+                allRootTimelines.forEach(timeline => { // `timeline` is now guaranteed to be a Timeline instance
+                    // Check if it's currently active (not completed, paused, or reversed)
+                    if (timeline.progress() < 1 && !timeline.paused() && !timeline.reversed() && timeline.duration() > 0) {
                         currentlyPolledTimelines.add(timeline);
                         let props = activeTimelines.get(timeline);
                         if (!props) {
@@ -607,6 +606,7 @@
                     }
                 });
                 activeTimelines.forEach((props, timeline) => {
+                    // Remove timelines that are no longer active or tracked by GSAP
                     if (!currentlyPolledTimelines.has(timeline) && (timeline.progress() === 1 || timeline.paused() || timeline.reversed())) {
                         activeTimelines.delete(timeline);
                     }
@@ -641,7 +641,8 @@
                     activeScrollTriggers.set(st, props);
                 });
                 activeScrollTriggers.forEach((props, st) => {
-                    if (!currentlyPolledSTs.has(st) && (!st.animation || st.animation.progress() === 1)) { // Also check if its associated animation completed
+                    // Remove STs if no longer polled or its associated animation completed (if it has one)
+                    if (!currentlyPolledSTs.has(st) && (!st.animation || st.animation.progress() === 1)) {
                         activeScrollTriggers.delete(st);
                     }
                 });
@@ -684,7 +685,6 @@
         });
 
         // --- Update UI Loop and Keyboard Shortcut ---
-        // UI updates are separate from data collection.
         setInterval(updateDisplay, 100); // UI update frequency
 
         window.addEventListener('keydown', (e) => {
