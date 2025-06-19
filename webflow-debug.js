@@ -2,11 +2,11 @@
 
 /**
  * GSAP Live Animation Debugger/Monitor for Webflow Projects
- * Version: 1.0.14 (Semantic Versioning: MAJOR.MINOR.PATCH)
+ * Version: 1.0.15 (Semantic Versioning: MAJOR.MINOR.PATCH)
  * - Incremented patch for:
- * - FIX: Resolved `TypeError: timeline.getChildren is not a function` by adding robust `instanceof gsap.core.Timeline`
- * and `instanceof gsap.core.Tween` checks in the `tickerUpdate` function. This ensures `getChildren` is only
- * called on valid Timeline instances and data is processed correctly for tweens vs. timelines.
+ * - CRITICAL FIX: Resolved `TypeError: timeline.getChildren is not a function` by adding robust `instanceof gsap.core.Timeline`
+ * and `instanceof gsap.core.Tween` checks directly within the `tickerUpdate` function loops. This ensures methods
+ * like `getChildren()` are only called on valid Timeline instances, preventing runtime errors.
  *
  * This script provides an on-screen overlay debugger to help Webflow developers
  * monitor and troubleshoot GSAP animations and ScrollTrigger states in real-time.
@@ -30,7 +30,7 @@
  */
 (function() {
     // --- Configuration and Persistence ---
-    const DEBUGGER_VERSION = "1.0.14"; // Updated debugger version constant
+    const DEBUGGER_VERSION = "1.0.15"; // Updated debugger version constant
     const DEBUGGER_PARAM = 'debug';
     const LOCAL_STORAGE_KEY = 'gsapDebuggerEnabled';
 
@@ -523,7 +523,13 @@
                 // Maintain a list of currently polled tweens to detect completed ones
                 const currentlyPolledTweens = new Set();
 
-                allRootTweens.forEach(tween => { // Now `tween` is guaranteed to be a Tween instance
+                allRootTweens.forEach(anim => { // Use 'anim' for a generic loop variable
+                    // Explicitly check if it's a GSAP Tween instance
+                    if (!(anim instanceof gsap.core.Tween)) {
+                        return; // Skip if not a tween
+                    }
+                    const tween = anim; // Now safely treat as a tween
+
                     // Check if it's currently active (not completed, paused, or reversed)
                     if (tween.progress() < 1 && !tween.paused() && !tween.reversed() && tween.duration() > 0) {
                         currentlyPolledTweens.add(tween);
@@ -581,7 +587,13 @@
                 const allRootTimelines = gsap.globalTimeline.getChildren(false, true, false); // includeTweens=false, includeTimelines=true
 
                 const currentlyPolledTimelines = new Set();
-                allRootTimelines.forEach(timeline => { // `timeline` is now guaranteed to be a Timeline instance
+                allRootTimelines.forEach(anim => { // Use 'anim' for a generic loop variable
+                    // Explicitly check if it's a GSAP Timeline instance
+                    if (!(anim instanceof gsap.core.Timeline)) {
+                        return; // Skip if not a timeline
+                    }
+                    const timeline = anim; // Now safely treat as a timeline
+
                     // Check if it's currently active (not completed, paused, or reversed)
                     if (timeline.progress() < 1 && !timeline.paused() && !timeline.reversed() && timeline.duration() > 0) {
                         currentlyPolledTimelines.add(timeline);
@@ -595,7 +607,8 @@
                             currentTime: timeline.time().toFixed(2) + 's',
                             timeScale: timeline.timeScale().toFixed(2),
                             totalDuration: timeline.totalDuration().toFixed(2) + 's',
-                            positionParametersUsed: timeline.getChildren().some(t => typeof t.position === 'string' && (t.position.includes('<') || t.position.includes('>') || t.position.includes('+='))),
+                            // The next line is the one that caused the error:
+                            positionParametersUsed: (timeline.getChildren && timeline.getChildren().some(t => typeof t.position === 'string' && (t.position.includes('<') || t.position.includes('>') || t.position.includes('+=')))) || false,
                             callbacks: {
                                 onComplete: !!timeline.vars.onComplete,
                                 onStart: !!timeline.vars.onStart,
