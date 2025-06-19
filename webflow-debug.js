@@ -2,13 +2,15 @@
 
 /**
  * GSAP Live Animation Debugger/Monitor for Webflow Projects
- * Version: 1.0.12 (Semantic Versioning: MAJOR.MINOR.PATCH)
+ * Version: 1.0.13 (Semantic Versioning: MAJOR.MINOR.PATCH)
  * - Incremented patch for:
- * - CRITICAL FIX: Eliminating interference with existing GSAP animations.
- * - Observers (monitorTween, monitorTimeline, monitorScrollTrigger) are now ALWAYS attached to GSAP instances.
- * - Data collection/processing is conditionally executed *within* the observer callbacks,
- * ensuring the debugger observes without disrupting GSAP's internal operations.
- * - Clears data maps immediately when a section is toggled OFF.
+ * - CRITICAL ARCHITECTURAL CHANGE: Eliminating ALL direct interference with GSAP animations.
+ * - Removed overrides for gsap.to, gsap.from, gsap.timeline, gsap.set.
+ * - Data collection is now entirely driven by `gsap.ticker.add()`, which polls active
+ * GSAP instances (tweens, timelines, ScrollTriggers) without modifying their behavior.
+ * - Conditional data processing refined: Data is only extracted and stored if the debugger is active
+ * and the corresponding menu section is checked.
+ * - This ensures the debugger is a purely passive observer.
  *
  * This script provides an on-screen overlay debugger to help Webflow developers
  * monitor and troubleshoot GSAP animations and ScrollTrigger states in real-time.
@@ -32,7 +34,7 @@
  */
 (function() {
     // --- Configuration and Persistence ---
-    const DEBUGGER_VERSION = "1.0.12"; // Updated debugger version constant
+    const DEBUGGER_VERSION = "1.0.13"; // Updated debugger version constant
     const DEBUGGER_PARAM = 'debug';
     const LOCAL_STORAGE_KEY = 'gsapDebuggerEnabled';
 
@@ -242,7 +244,6 @@
             const toggleButton = debuggerContainer.querySelector('#gsap-debugger-toggle');
 
             // --- References to Menu Checkboxes for Conditional Data Collection ---
-            // These references are crucial for checking checkbox states before collecting data
             const menuCoreAnimationsCheckbox = debuggerContainer.querySelector('#menu-core-animations');
             const menuTimelinesCheckbox = debuggerContainer.querySelector('#menu-timelines');
             const menuScrollTriggerCheckbox = debuggerContainer.querySelector('#menu-scrolltrigger');
@@ -260,10 +261,8 @@
                     toggleButton.textContent = 'OFF';
                     toggleButton.classList.remove('on');
                     toggleButton.classList.add('off');
-                    // Special behavior for turning OFF: Reload and clean URL
                     const currentUrl = new URL(window.location.href);
-                    currentUrl.searchParams.delete(DEBUGGER_PARAM); // Remove the '?debug' parameter
-
+                    currentUrl.searchParams.delete(DEBUGGER_PARAM);
                     window.location.replace(currentUrl.toString());
                 }
             };
@@ -274,7 +273,7 @@
                 updateToggleButton();
             });
 
-            updateToggleButton(); // Initial call to set the correct state and display
+            updateToggleButton();
 
             const animationDiv = debuggerContainer.querySelector('#gsap-debugger-animations');
             const timelineDiv = debuggerContainer.querySelector('#gsap-debugger-timelines');
@@ -299,10 +298,8 @@
                     }
                 };
 
-                // Initial state
                 applyState(checkbox.checked);
 
-                // On change
                 checkbox.addEventListener('change', (e) => {
                     applyState(e.target.checked);
                     // Clear data when a section is toggled OFF
@@ -315,7 +312,6 @@
                 });
             };
 
-            // Initialize all menu items
             updateMenuItem('menu-core-animations', animationDiv, 'label-core-animations');
             updateMenuItem('menu-timelines', timelineDiv, 'label-timelines');
             updateMenuItem('menu-scrolltrigger', scrollTriggerDiv, 'label-scrolltrigger');
@@ -363,7 +359,7 @@
                 timelineDiv,
                 scrollTriggerDiv,
                 eventsDiv,
-                menuCoreAnimationsCheckbox, // Exporting checkbox references
+                menuCoreAnimationsCheckbox,
                 menuTimelinesCheckbox,
                 menuScrollTriggerCheckbox,
                 menuEventsCheckbox
@@ -373,11 +369,13 @@
         const ui = createDebuggerUI();
 
         // --- Data Storage ---
+        // Using Maps to store active animations/timelines/scrollTriggers. Keys are the GSAP instances.
         const activeAnimations = new Map();
         const activeTimelines = new Map();
         const activeScrollTriggers = new Map();
-        const eventData = {};
+        const eventData = {}; // For mouse/keyboard events
 
+        // Helper function to format property values for display
         const formatProperty = (key, value) => {
             if (typeof value === 'number') {
                 return `${key}: ${value.toFixed(2)}`;
@@ -386,11 +384,12 @@
                 return `${key}: ${value ? 'true' : 'false'}`;
             }
             if (typeof value === 'string' && value.length > 50) {
-                 return `${key}: ${value.substring(0, 47)}...`;
+                 return `${key}: ${value.substring(0, 47)}...`; // Truncate long strings
             }
             return `${key}: ${value}`;
         };
 
+        // Helper function to get a readable identifier for a DOM element
         const getElementIdentifier = (el) => {
             if (!el) return 'N/A';
             if (el === window) return 'Window';
@@ -410,7 +409,7 @@
         const updateDisplay = () => {
             if (!debuggerEnabled) return;
 
-            // Only update sections if their corresponding menu checkbox is checked
+            // Update Core Animations section if visible
             if (ui.menuCoreAnimationsCheckbox.checked) {
                 let animHTML = '<h5>Animations:</h5>';
                 if (activeAnimations.size === 0) {
@@ -419,18 +418,15 @@
                     activeAnimations.forEach((props, tween) => {
                         const target = tween.targets()[0];
                         animHTML += `<div><strong>Target: ${getElementIdentifier(target)}</strong>`;
-                        // Display static properties
                         ['duration', 'delay', 'ease', 'repeat', 'yoyo', 'stagger'].forEach(prop => {
                             if (props[prop] !== undefined) {
                                 animHTML += `<p style="margin-left: 10px;">${formatProperty(prop, props[prop])}</p>`;
                             }
                         });
-                        // Display current (live) transform properties
-                        for (const key in props.current) {
+                        for (const key in props.current) { // Live current values (x, y, rotation, etc.)
                             animHTML += `<p style="margin-left: 10px;">${formatProperty(key, props.current[key])}</p>`;
                         }
-                        // Display target values for other CSS properties
-                        for (const key in props) {
+                        for (const key in props) { // Target values for other CSS properties
                             if (!['duration', 'delay', 'ease', 'repeat', 'yoyo', 'stagger', 'current'].includes(key)) {
                                 animHTML += `<p style="margin-left: 10px;">${formatProperty(key, props[key])} (target)</p>`;
                             }
@@ -440,10 +436,10 @@
                 }
                 ui.animationDiv.innerHTML = animHTML;
             } else {
-                ui.animationDiv.innerHTML = ''; // Clear content if section is off
+                ui.animationDiv.innerHTML = '';
             }
 
-
+            // Update Timelines section if visible
             if (ui.menuTimelinesCheckbox.checked) {
                 let timelineHTML = '<h5>Timelines:</h5>';
                 if (activeTimelines.size === 0) {
@@ -466,10 +462,10 @@
                 }
                 ui.timelineDiv.innerHTML = timelineHTML;
             } else {
-                ui.timelineDiv.innerHTML = ''; // Clear content if section is off
+                ui.timelineDiv.innerHTML = '';
             }
 
-
+            // Update ScrollTriggers section if visible
             if (ui.menuScrollTriggerCheckbox.checked) {
                 let stHTML = '<h5>ScrollTriggers:</h5>';
                 if (activeScrollTriggers.size === 0) {
@@ -491,10 +487,10 @@
                 }
                 ui.scrollTriggerDiv.innerHTML = stHTML;
             } else {
-                ui.scrollTriggerDiv.innerHTML = ''; // Clear content if section is off
+                ui.scrollTriggerDiv.innerHTML = '';
             }
 
-
+            // Update Events section if visible
             if (ui.menuEventsCheckbox.checked) {
                 let eventHTML = '<h5>Events:</h5>';
                 if (Object.keys(eventData).length === 0) {
@@ -506,230 +502,166 @@
                 }
                 ui.eventsDiv.innerHTML = eventHTML;
             } else {
-                ui.eventsDiv.innerHTML = ''; // Clear content if section is off
+                ui.eventsDiv.innerHTML = '';
             }
         };
 
-        // --- GSAP Hooking (Core Animations) ---
-        const originalTo = gsap.to;
-        const originalFrom = gsap.from;
-        const originalFromTo = gsap.fromTo;
-        const originalSet = gsap.set;
-        const originalTimeline = gsap.timeline;
 
-        // Override GSAP methods to ALWAYS capture tweens/timelines on creation
-        // The decision to process/display data is handled *inside* the monitor functions
-        gsap.to = function(...args) {
-            const tween = originalTo.apply(gsap, args);
-            monitorTween(tween); // Always attach observer
-            return tween;
-        };
-        gsap.from = function(...args) {
-            const tween = originalFrom.apply(gsap, args);
-            monitorTween(tween); // Always attach observer
-            return tween;
-        };
-        gsap.fromTo = function(...args) {
-            const tween = originalFromTo.apply(gsap, args);
-            monitorTween(tween); // Always attach observer
-            return tween;
-        };
-        gsap.set = function(...args) {
-            const tween = originalSet.apply(gsap, args);
-            monitorTween(tween); // Always attach observer (even for set, as it might be relevant)
-            return tween;
-        };
-        gsap.timeline = function(...args) {
-            const timeline = originalTimeline.apply(gsap, args);
-            monitorTimeline(timeline); // Always attach observer
-            return timeline;
-        };
-
-        // Function to monitor individual GSAP tweens
-        const monitorTween = (tween) => {
-            // Initial data capture, regardless of checkbox state (minimal processing)
-            const staticProps = {};
-            ['duration', 'delay', 'ease', 'repeat', 'yoyo', 'stagger'].forEach(prop => {
-                if (tween.vars[prop] !== undefined) {
-                    staticProps[prop] = tween.vars[prop];
-                }
-            });
-            const cssPropsToMonitor = {};
-            Object.keys(tween.vars).forEach(key => {
-                const excluded = ['onUpdate', 'onComplete', 'onStart', 'onReverseComplete', 'onInterrupt', 'onRepeat', 'onEachComplete', 'delay', 'duration', 'ease', 'repeat', 'yoyo', 'stagger', 'id', 'overwrite', 'callbackScope', 'paused', 'reversed', 'data', 'immediateRender', 'lazy', 'inherit', 'runBackwards', 'simple', 'overwrite', 'callbackScope', 'defaults', 'onToggle', 'scrollTrigger'];
-                if (!excluded.includes(key) && typeof tween.vars[key] !== 'function') {
-                    cssPropsToMonitor[key] = tween.vars[key];
-                }
-            });
-
-            // Store initial data. `current` will be updated conditionally.
-            // Add or update the tween in the map if the core animations checkbox is currently checked.
-            // This ensures only relevant data is added to the map.
-            if (debuggerEnabled && ui.menuCoreAnimationsCheckbox.checked) {
-                activeAnimations.set(tween, {...staticProps, ...cssPropsToMonitor, current: {}});
+        // --- GSAP Ticker for Data Polling (Non-interfering observation) ---
+        // This function runs on every GSAP animation frame.
+        const tickerUpdate = () => {
+            if (!debuggerEnabled) {
+                // If debugger is disabled, clear all data maps to reduce memory footprint
+                activeAnimations.clear();
+                activeTimelines.clear();
+                activeScrollTriggers.clear();
+                Object.keys(eventData).forEach(key => delete eventData[key]);
+                return;
             }
 
+            // --- Collect Core Animations Data ---
+            if (ui.menuCoreAnimationsCheckbox.checked) {
+                // Get all active tweens and timelines from GSAP's global timeline
+                const allActiveAnimations = gsap.globalTimeline.getChildren(true, true, false); // include tweens, timelines, exclude labels/callbacks
 
-            // Attach an onUpdate callback to the tween
-            tween.eventCallback('onUpdate', () => {
-                // IMPORTANT: Only process data if debugger is enabled AND the core animations section is visible
-                if (!debuggerEnabled || !ui.menuCoreAnimationsCheckbox.checked) {
-                    // If the debugger is enabled but the section is OFF, ensure this specific tween's data is removed.
-                    // This is to prevent stale data from appearing if the section is toggled back ON later.
-                    activeAnimations.delete(tween);
-                    return; // Stop processing further for this update cycle
-                }
+                // Maintain a list of currently polled animations to detect completed ones
+                const currentlyPolledTweens = new Set();
 
-                const target = tween.targets()[0];
-                if (!target) return;
+                allActiveAnimations.forEach(animation => {
+                    // Check if it's a tween (not a timeline, which we handle separately) and it's active
+                    if (animation.parent === gsap.globalTimeline && animation.progress() < 1 && !animation.paused() && !animation.reversed() && animation.duration() > 0) { // Exclude completed tweens or paused ones
+                        currentlyPolledTweens.add(animation);
 
-                // Ensure the tween is still in the map before attempting to update it.
-                // It might have been deleted if the checkbox was toggled off and then back on,
-                // and this update is for an older, already running tween.
-                let currentProps = activeAnimations.get(tween);
-                if (!currentProps) {
-                    // If not found, re-initialize it in the map. This covers cases where it was deleted
-                    // due to checkbox toggle, but the animation is still running.
-                    currentProps = {...staticProps, ...cssPropsToMonitor, current: {}};
-                    activeAnimations.set(tween, currentProps);
-                }
+                        let props = activeAnimations.get(animation);
+                        if (!props) {
+                            // If not already tracked, initialize it with static and target CSS properties
+                            const staticProps = {};
+                            ['duration', 'delay', 'ease', 'repeat', 'yoyo', 'stagger'].forEach(prop => {
+                                if (animation.vars[prop] !== undefined) {
+                                    staticProps[prop] = animation.vars[prop];
+                                }
+                            });
+                            const cssPropsToMonitor = {};
+                            Object.keys(animation.vars).forEach(key => {
+                                const excluded = ['onUpdate', 'onComplete', 'onStart', 'onReverseComplete', 'onInterrupt', 'onRepeat', 'onEachComplete', 'delay', 'duration', 'ease', 'repeat', 'yoyo', 'stagger', 'id', 'overwrite', 'callbackScope', 'paused', 'reversed', 'data', 'immediateRender', 'lazy', 'inherit', 'runBackwards', 'simple', 'overwrite', 'callbackScope', 'defaults', 'onToggle', 'scrollTrigger'];
+                                if (!excluded.includes(key) && typeof animation.vars[key] !== 'function') {
+                                    cssPropsToMonitor[key] = animation.vars[key];
+                                }
+                            });
+                            props = {...staticProps, ...cssPropsToMonitor, current: {}};
+                            activeAnimations.set(animation, props);
+                        }
 
-                const liveUpdates = {};
-                const coreTransformProps = ['x', 'y', 'rotation', 'scaleX', 'scaleY', 'opacity'];
-                coreTransformProps.forEach(prop => {
-                    if (tween.vars[prop] !== undefined) {
-                        liveUpdates[`current_${prop}`] = gsap.getProperty(target, prop);
+                        // Update live properties
+                        const target = animation.targets()[0];
+                        if (target) {
+                            const liveUpdates = {};
+                            const coreTransformProps = ['x', 'y', 'rotation', 'scaleX', 'scaleY', 'opacity'];
+                            coreTransformProps.forEach(prop => {
+                                if (animation.vars[prop] !== undefined) {
+                                    liveUpdates[`current_${prop}`] = gsap.getProperty(target, prop);
+                                }
+                            });
+                            Object.assign(props.current, liveUpdates);
+                            activeAnimations.set(animation, props); // Re-set to ensure map is updated
+                        }
                     }
                 });
 
-                Object.assign(currentProps.current, liveUpdates);
-                activeAnimations.set(tween, currentProps);
-            });
-
-            // Clean up data when animation completes
-            tween.eventCallback('onComplete', () => {
-                activeAnimations.delete(tween);
-            });
-            tween.eventCallback('onReverseComplete', () => {
-                activeAnimations.delete(tween);
-            });
-        };
-
-        const monitorTimeline = (timeline) => {
-            // Only add to map if the timelines checkbox is currently checked
-            if (debuggerEnabled && ui.menuTimelinesCheckbox.checked) {
-                activeTimelines.set(timeline, {});
-            }
-
-            timeline.eventCallback('onUpdate', () => {
-                // IMPORTANT: Only process data if debugger is enabled AND the timelines section is visible
-                if (!debuggerEnabled || !ui.menuTimelinesCheckbox.checked) {
-                    activeTimelines.delete(timeline);
-                    return;
-                }
-
-                let props = activeTimelines.get(timeline);
-                if (!props) { // Re-initialize if deleted due to toggle
-                    props = {};
-                    activeTimelines.set(timeline, props);
-                }
-
-                Object.assign(props, {
-                    status: timeline.paused() ? 'paused' : (timeline.reversed() ? 'reversed' : 'playing'),
-                    currentTime: timeline.time().toFixed(2) + 's',
-                    timeScale: timeline.timeScale().toFixed(2),
-                    totalDuration: timeline.totalDuration().toFixed(2) + 's',
-                    positionParametersUsed: timeline.getChildren().some(t => typeof t.position === 'string' && (t.position.includes('<') || t.position.includes('>') || t.position.includes('+='))),
-                    callbacks: {
-                        onComplete: !!timeline.vars.onComplete,
-                        onStart: !!timeline.vars.onStart,
-                        onReverseComplete: !!timeline.vars.onReverseComplete
+                // Remove tweens from activeAnimations that are no longer active or tracked by GSAP
+                activeAnimations.forEach((props, tween) => {
+                    if (!currentlyPolledTweens.has(tween) && (tween.progress() === 1 || tween.paused() || tween.reversed())) { // Consider removing if complete/paused
+                        activeAnimations.delete(tween);
                     }
                 });
-                activeTimelines.set(timeline, props);
-            });
-            timeline.eventCallback('onComplete', () => {
-                activeTimelines.delete(timeline);
-            });
-            timeline.eventCallback('onReverseComplete', () => {
-                activeTimelines.delete(timeline);
-            });
-        };
-
-        // --- ScrollTrigger Hooking ---
-        if (scrollTriggerAvailable) {
-             gsap.registerPlugin(ScrollTrigger);
-
-            const initialSTs = ScrollTrigger.getAll();
-            initialSTs.forEach(st => {
-                monitorScrollTrigger(st); // Always attach observer
-            });
-
-            // Re-check periodically for newly created ScrollTriggers
-            setInterval(() => {
-                // If section is OFF, clear all ST data and don't process further
-                if (!debuggerEnabled || !ui.menuScrollTriggerCheckbox.checked) {
-                    activeScrollTriggers.clear();
-                    return;
-                }
-                ScrollTrigger.getAll().forEach(st => {
-                    if (!activeScrollTriggers.has(st)) {
-                        monitorScrollTrigger(st);
-                    }
-                });
-            }, 500);
-        }
-
-        const monitorScrollTrigger = (st) => {
-            // Initial check: if already tracking, do nothing.
-            // If section is off, don't add to map, but still attach listeners for future state changes.
-            if (activeScrollTriggers.has(st)) return;
-
-            if (debuggerEnabled && ui.menuScrollTriggerCheckbox.checked) {
-                activeScrollTriggers.set(st, {}); // Initialize if section is ON
+            } else {
+                activeAnimations.clear(); // Clear all data if section is off
             }
 
-            const updateSTProps = (self) => {
-                // IMPORTANT: Only process data if debugger is enabled AND the scrolltrigger section is visible
-                if (!debuggerEnabled || !ui.menuScrollTriggerCheckbox.checked) {
-                    activeScrollTriggers.delete(st); // Clear this ST's data if section is off
-                    return;
-                }
+            // --- Collect Timelines Data ---
+            if (ui.menuTimelinesCheckbox.checked) {
+                const allTimelines = gsap.globalTimeline.getChildren(false, true, false); // Only direct children timelines
 
-                let props = activeScrollTriggers.get(st);
-                if (!props) { // Re-initialize if deleted due to toggle
-                    props = {};
+                const currentlyPolledTimelines = new Set();
+                allTimelines.forEach(timeline => {
+                    if (timeline.parent === gsap.globalTimeline) { // Ensure it's a root-level timeline
+                        currentlyPolledTimelines.add(timeline);
+                        let props = activeTimelines.get(timeline);
+                        if (!props) {
+                            props = {}; // Initialize if not tracked
+                            activeTimelines.set(timeline, props);
+                        }
+                        Object.assign(props, {
+                            status: timeline.paused() ? 'paused' : (timeline.reversed() ? 'reversed' : 'playing'),
+                            currentTime: timeline.time().toFixed(2) + 's',
+                            timeScale: timeline.timeScale().toFixed(2),
+                            totalDuration: timeline.totalDuration().toFixed(2) + 's',
+                            positionParametersUsed: timeline.getChildren().some(t => typeof t.position === 'string' && (t.position.includes('<') || t.position.includes('>') || t.position.includes('+='))),
+                            callbacks: {
+                                onComplete: !!timeline.vars.onComplete,
+                                onStart: !!timeline.vars.onStart,
+                                onReverseComplete: !!timeline.vars.onReverseComplete
+                            }
+                        });
+                        activeTimelines.set(timeline, props);
+                    }
+                });
+                activeTimelines.forEach((props, timeline) => {
+                    if (!currentlyPolledTimelines.has(timeline) && (timeline.progress() === 1 || timeline.paused() || timeline.reversed())) {
+                        activeTimelines.delete(timeline);
+                    }
+                });
+            } else {
+                activeTimelines.clear();
+            }
+
+            // --- Collect ScrollTriggers Data ---
+            if (ui.menuScrollTriggerCheckbox.checked && scrollTriggerAvailable) {
+                const allScrollTriggers = ScrollTrigger.getAll();
+                const currentlyPolledSTs = new Set();
+
+                allScrollTriggers.forEach(st => {
+                    currentlyPolledSTs.add(st);
+                    let props = activeScrollTriggers.get(st);
+                    if (!props) {
+                        props = {}; // Initialize if not tracked
+                        activeScrollTriggers.set(st, props);
+                    }
+                    Object.assign(props, {
+                        triggerElement: getElementIdentifier(st.trigger),
+                        scroller: getElementIdentifier(st.scroller),
+                        start: typeof st.start === 'number' ? st.start.toFixed(0) : st.start,
+                        end: typeof st.end === 'number' ? st.end.toFixed(0) : st.end,
+                        currentProgress: st.progress.toFixed(3),
+                        scrubValue: st.vars.scrub === true ? 'true' : (typeof st.vars.scrub === 'number' ? st.vars.scrub.toFixed(1) : 'none'),
+                        pinState: st.pin ? 'true' : 'false',
+                        isActive: st.isActive ? 'true' : 'false',
+                        toggleActions: st.vars.toggleActions ? st.vars.toggleActions.split(' ').join(', ') : 'play, none, none, none'
+                    });
                     activeScrollTriggers.set(st, props);
-                }
-
-                Object.assign(props, {
-                    triggerElement: getElementIdentifier(self.trigger),
-                    scroller: getElementIdentifier(self.scroller),
-                    start: typeof self.start === 'number' ? self.start.toFixed(0) : self.start,
-                    end: typeof self.end === 'number' ? self.end.toFixed(0) : self.end,
-                    currentProgress: self.progress.toFixed(3),
-                    scrubValue: self.vars.scrub === true ? 'true' : (typeof self.vars.scrub === 'number' ? self.vars.scrub.toFixed(1) : 'none'),
-                    pinState: self.pin ? 'true' : 'false',
-                    isActive: self.isActive ? 'true' : 'false',
-                    toggleActions: self.vars.toggleActions ? self.vars.toggleActions.split(' ').join(', ') : 'play, none, none, none'
                 });
-                activeScrollTriggers.set(st, props);
-            };
+                activeScrollTriggers.forEach((props, st) => {
+                    if (!currentlyPolledSTs.has(st) && (!st.animation || st.animation.progress() === 1)) { // Also check if its associated animation completed
+                        activeScrollTriggers.delete(st);
+                    }
+                });
+            } else {
+                activeScrollTriggers.clear();
+            }
 
-            // Attach event listeners to ScrollTrigger instance
-            // These callbacks will *always* fire, but their body will conditionally process data
-            st.onUpdate(self => updateSTProps(self));
-            st.onToggle(self => updateSTProps(self));
-            st.onRefresh(self => updateSTProps(self));
-
-            updateSTProps(st); // Initial population of properties (conditionally)
+            // Events data is handled by direct event listeners, no need to poll here.
+            // Clear if disabled.
+            if (!ui.menuEventsCheckbox.checked) {
+                 Object.keys(eventData).forEach(key => delete eventData[key]);
+            }
         };
+
+        // Add the primary data collection function to GSAP's ticker
+        gsap.ticker.add(tickerUpdate);
 
         // --- Mouse/Event-Related Data ---
         const updateEventData = (type, e) => {
-            // Only collect event data if the debugger is enabled AND the events section is checked
             if (!debuggerEnabled || !ui.menuEventsCheckbox.checked) {
-                // If checkbox is unchecked, clear existing event data
                 Object.keys(eventData).forEach(key => delete eventData[key]);
                 return;
             }
@@ -751,7 +683,8 @@
              updateEventData('resize', { target: window });
         });
 
-        // --- Update Loop and Keyboard Shortcut ---
+        // --- Update UI Loop and Keyboard Shortcut ---
+        // UI updates are separate from data collection.
         setInterval(updateDisplay, 100); // UI update frequency
 
         window.addEventListener('keydown', (e) => {
@@ -767,7 +700,7 @@
 
     // --- Initial Entry Point ---
     window.addEventListener('DOMContentLoaded', () => {
-        setTimeout(initializeDebugger, 500);
+        setTimeout(initializeDebugger, 500); // Give Webflow & GSAP a moment to load
     });
 
 })();
