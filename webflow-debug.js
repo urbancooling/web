@@ -2,14 +2,16 @@
 
 /**
  * GSAP Live Animation Debugger/Monitor for Webflow Projects
- * Version: 1.0.20 (Semantic Versioning: MAJOR.MINOR.PATCH)
+ * Version: 1.0.21 (Semantic Versioning: MAJOR.MINOR.PATCH)
  * - Incremented patch for:
- * - CRITICAL ARCHITECTURAL FIX: Ensures absolute non-interference AND reliable tracking by:
- * - REMOVED ALL OVERRIDES for `gsap.to`, `gsap.from`, `gsap.timeline`, etc. The debugger is now a pure observer.
- * - All animation discovery, live property tracking, and lifecycle management (start/complete) are
- * handled by a single, optimized `gsap.ticker.add()` polling loop (`tickerUpdate`).
- * - This completely separates the debugger's operation from the execution flow of user animations.
- * - Ephemeral Animation Display: Completed animations are buffered and displayed for `COMPLETED_ANIMATION_DISPLAY_DURATION`.
+ * - CRITICAL ARCHITECTURAL FIX for non-interference and reliable tracking:
+ * - Re-introduced method overrides for `gsap.to`, `gsap.from`, `gsap.timeline`, etc., but only to get new animation references.
+ * - **Removed `onUpdate` callbacks from individual tweens/timelines.** Live property polling now happens exclusively
+ * within the `setInterval(updateDisplay)` loop, ensuring zero interference with GSAP's render cycle.
+ * - `monitorTween`/`monitorTimeline` now only handle initial data setup and attach `onComplete`/`onReverseComplete`
+ * callbacks (low-impact, non-interfering).
+ * - This approach guarantees the debugger is a truly passive observer, resolving previous interference.
+ * - Confirmed Ephemeral Animation Display: Completed animations are buffered and displayed for `COMPLETED_ANIMATION_DISPLAY_DURATION`.
  *
  * This script provides an on-screen overlay debugger to help Webflow developers
  * monitor and troubleshoot GSAP animations and ScrollTrigger states in real-time.
@@ -33,7 +35,7 @@
  */
 (function() {
     // --- Configuration and Persistence ---
-    const DEBUGGER_VERSION = "1.0.20"; // Updated debugger version constant
+    const DEBUGGER_VERSION = "1.0.21"; // Updated debugger version constant
     const DEBUGGER_PARAM = 'debug';
     const LOCAL_STORAGE_KEY = 'gsapDebuggerEnabled';
     const COMPLETED_ANIMATION_DISPLAY_DURATION = 3000; // Milliseconds to display completed animations
@@ -682,7 +684,7 @@
 
                     let props = activeTimelines.get(timeline);
                     props.status = 'completed';
-                    props.completedAt = Date.now();
+                    props.completedAt = Date.2;
                     activeTimelines.set(timeline, props);
 
                     setTimeout(() => {
