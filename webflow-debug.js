@@ -2,14 +2,12 @@
 
 /**
  * GSAP Live Animation Debugger/Monitor for Webflow Projects
- * Version: 1.0.18 (Semantic Versioning: MAJOR.MINOR.PATCH)
+ * Version: 1.0.19 (Semantic Versioning: MAJOR.MINOR.PATCH)
  * - Incremented patch for:
- * - CRITICAL ARCHITECTURAL FIX: Ensures absolute non-interference AND reliable tracking by:
- * - Overriding GSAP creation methods (`gsap.to`, `gsap.timeline` etc.) ONLY to get references to new animations.
- * - **Removed ALL `onUpdate` callbacks from individual tweens/timelines for the debugger.**
- * - Live property tracking (x, y, progress, currentTime) is now done exclusively via a single, centralized `gsap.ticker.add()` polling loop.
- * - This separates debugger observation from animation execution, preventing interference.
- * - Confirmed Ephemeral Animation Display logic: Completed animations are buffered and displayed for `COMPLETED_ANIMATION_DISPLAY_DURATION`.
+ * - CRITICAL FIX: Resolved tracking and interference issues by re-implementing `onUpdate` callbacks on tweens/timelines
+ * using `tween.eventCallback()` (which *adds* observers without overwriting user callbacks).
+ * - `gsap.ticker.add()` now solely handles the UI update loop, no longer actively polls animations.
+ * - This provides the most robust and non-interfering tracking mechanism.
  *
  * This script provides an on-screen overlay debugger to help Webflow developers
  * monitor and troubleshoot GSAP animations and ScrollTrigger states in real-time.
@@ -33,7 +31,7 @@
  */
 (function() {
     // --- Configuration and Persistence ---
-    const DEBUGGER_VERSION = "1.0.18"; // Updated debugger version constant
+    const DEBUGGER_VERSION = "1.0.19"; // Updated debugger version constant
     const DEBUGGER_PARAM = 'debug';
     const LOCAL_STORAGE_KEY = 'gsapDebuggerEnabled';
     const COMPLETED_ANIMATION_DISPLAY_DURATION = 3000; // Milliseconds to display completed animations
@@ -520,15 +518,8 @@
 
         // Function to monitor individual GSAP tweens
         const monitorTween = (tween) => {
-            // Only proceed if debugger is enabled AND the core animations section is tracked.
-            // This ensures data is only gathered when needed.
-            if (!debuggerEnabled || !ui.menuCoreAnimationsCheckbox.checked) {
-                activeAnimations.delete(tween); // Ensure it's not tracked if conditions aren't met
-                return;
-            }
-
-            // If not already tracking this tween, initialize its data
-            if (!activeAnimations.has(tween)) {
+            // Only add to Map if not already tracking AND section is ON (optimization)
+            if (!activeAnimations.has(tween) && debuggerEnabled && ui.menuCoreAnimationsCheckbox.checked) {
                 const staticProps = {};
                 ['duration', 'delay', 'ease', 'repeat', 'yoyo', 'stagger'].forEach(prop => {
                     if (tween.vars[prop] !== undefined) staticProps[prop] = tween.vars[prop];
@@ -541,101 +532,94 @@
                     }
                 });
                 activeAnimations.set(tween, {...staticProps, ...cssPropsToMonitor, current: {}, status: 'playing', completedAt: null});
-            }
 
+                // Attach onUpdate callback to continuously update live properties
+                // IMPORTANT: Using `eventCallback` ADDS a listener, it does NOT overwrite user's callbacks.
+                tween.eventCallback('onUpdate', function() {
+                    // Only process update if debugger is enabled AND section is checked
+                    if (!debuggerEnabled || !ui.menuCoreAnimationsCheckbox.checked) {
+                        return; // Do nothing if not enabled/checked
+                    }
 
-            // Attach onUpdate callback to continuously update live properties
-            // IMPORTANT: Using `eventCallback` ADDS a listener, it does NOT overwrite user's callbacks.
-            tween.eventCallback('onUpdate', function() {
-                if (!debuggerEnabled || !ui.menuCoreAnimationsCheckbox.checked) {
-                    activeAnimations.delete(tween);
-                    return;
-                }
+                    let props = activeAnimations.get(tween);
+                    if (!props) { // Re-initialize if for some reason it was deleted (e.g., section toggled off then on)
+                        // If debugger was off and then turned on, and this animation was already running,
+                        // we need to add it to the map with its static properties.
+                        const staticPropsReinit = {};
+                        ['duration', 'delay', 'ease', 'repeat', 'yoyo', 'stagger'].forEach(prop => { if (tween.vars[prop] !== undefined) staticPropsReinit[prop] = tween.vars[prop]; });
+                        const cssPropsToMonitorReinit = {};
+                        Object.keys(tween.vars).forEach(key => {
+                            const excluded = ['onUpdate', 'onComplete', 'onStart', 'onReverseComplete', 'onInterrupt', 'onRepeat', 'onEachComplete', 'delay', 'duration', 'ease', 'repeat', 'yoyo', 'stagger', 'id', 'overwrite', 'callbackScope', 'paused', 'reversed', 'data', 'immediateRender', 'lazy', 'inherit', 'runBackwards', 'simple', 'overwrite', 'callbackScope', 'defaults', 'onToggle', 'scrollTrigger'];
+                            if (!excluded.includes(key) && typeof tween.vars[key] !== 'function') cssPropsToMonitorReinit[key] = tween.vars[key];
+                        });
+                        props = {...staticPropsReinit, ...cssPropsToMonitorReinit, current: {}, status: 'playing', completedAt: null};
+                        activeAnimations.set(tween, props);
+                    }
 
-                let props = activeAnimations.get(tween);
-                if (!props) { // If it was cleared (e.g., section toggled off then on again), re-initialize
-                    // Re-extract static and cssProps to ensure fresh data.
-                    const staticProps = {};
-                    ['duration', 'delay', 'ease', 'repeat', 'yoyo', 'stagger'].forEach(prop => { if (tween.vars[prop] !== undefined) staticProps[prop] = tween.vars[prop]; });
-                    const cssPropsToMonitor = {};
-                    Object.keys(tween.vars).forEach(key => {
-                        const excluded = ['onUpdate', 'onComplete', 'onStart', 'onReverseComplete', 'onInterrupt', 'onRepeat', 'onEachComplete', 'delay', 'duration', 'ease', 'repeat', 'yoyo', 'stagger', 'id', 'overwrite', 'callbackScope', 'paused', 'reversed', 'data', 'immediateRender', 'lazy', 'inherit', 'runBackwards', 'simple', 'overwrite', 'callbackScope', 'defaults', 'onToggle', 'scrollTrigger'];
-                        if (!excluded.includes(key) && typeof tween.vars[key] !== 'function') cssPropsToMonitor[key] = tween.vars[key];
-                    });
-                    props = {...staticProps, ...cssPropsToMonitor, current: {}, status: 'playing', completedAt: null};
+                    const target = tween.targets()[0];
+                    if (target) {
+                        const liveUpdates = {};
+                        const coreTransformProps = ['x', 'y', 'rotation', 'scaleX', 'scaleY', 'opacity', 'progress', 'time']; // Added progress and time
+                        coreTransformProps.forEach(prop => {
+                            // Check if the property is actually animated by this tween, or is a standard tween property
+                            if (tween.vars[prop] !== undefined || (prop === 'progress' || prop === 'time')) {
+                                liveUpdates[`current_${prop}`] = gsap.getProperty(target, prop); // Use getProperty for transforms
+                                if (prop === 'progress') liveUpdates[`current_${prop}`] = tween.progress(); // Explicitly get tween's progress
+                                if (prop === 'time') liveUpdates[`current_${prop}`] = tween.time(); // Explicitly get tween's time
+                            }
+                        });
+                        Object.assign(props.current, liveUpdates);
+                    }
+                    props.status = 'playing';
+                    props.completedAt = null; // Clear completedAt if animation becomes active again
                     activeAnimations.set(tween, props);
-                }
+                });
 
-                const target = tween.targets()[0];
-                if (target) {
-                    const liveUpdates = {};
-                    const coreTransformProps = ['x', 'y', 'rotation', 'scaleX', 'scaleY', 'opacity'];
-                    coreTransformProps.forEach(prop => {
-                        if (tween.vars[prop] !== undefined) {
-                            liveUpdates[`current_${prop}`] = gsap.getProperty(target, prop);
-                        }
-                    });
-                    Object.assign(props.current, liveUpdates);
-                }
-                props.status = 'playing';
-                props.completedAt = null; // Clear completedAt if animation becomes active again
-                activeAnimations.set(tween, props);
-            });
+                // Attach onComplete callback to mark as completed and set timestamp
+                tween.eventCallback('onComplete', function() {
+                    // Only process if debugger is still enabled and section checked
+                    if (debuggerEnabled && ui.menuCoreAnimationsCheckbox.checked && activeAnimations.has(tween)) {
+                        let props = activeAnimations.get(tween);
+                        props.status = 'completed';
+                        props.completedAt = Date.now();
+                        activeAnimations.set(tween, props);
+                        setTimeout(() => {
+                            if (activeAnimations.has(tween) && activeAnimations.get(tween).completedAt === props.completedAt) { // Only remove if it hasn't become active again since completion
+                                activeAnimations.delete(tween);
+                            }
+                        }, COMPLETED_ANIMATION_DISPLAY_DURATION);
+                    } else {
+                        activeAnimations.delete(tween); // Clean up immediately if no longer tracking
+                    }
+                });
 
-            // Attach onComplete callback to mark as completed and set timestamp
-            tween.eventCallback('onComplete', function() {
-                // If debugger is no longer enabled or section untracked, just delete.
-                if (!debuggerEnabled || !ui.menuCoreAnimationsCheckbox.checked) {
-                    activeAnimations.delete(tween);
-                    return;
-                }
-                if (!activeAnimations.has(tween)) return; // Already cleared, or not tracked
-
-                let props = activeAnimations.get(tween);
-                props.status = 'completed';
-                props.completedAt = Date.now();
-                activeAnimations.set(tween, props);
-
-                setTimeout(() => {
-                    if (activeAnimations.has(tween) && activeAnimations.get(tween).completedAt === props.completedAt) { // Only remove if it hasn't become active again since completion
+                // Similar logic for onReverseComplete
+                tween.eventCallback('onReverseComplete', function() {
+                    if (debuggerEnabled && ui.menuCoreAnimationsCheckbox.checked && activeAnimations.has(tween)) {
+                        let props = activeAnimations.get(tween);
+                        props.status = 'completed';
+                        props.completedAt = Date.now();
+                        activeAnimations.set(tween, props);
+                        setTimeout(() => {
+                            if (activeAnimations.has(tween) && activeAnimations.get(tween).completedAt === props.completedAt) {
+                                activeAnimations.delete(tween);
+                            }
+                        }, COMPLETED_ANIMATION_DISPLAY_DURATION);
+                    } else {
                         activeAnimations.delete(tween);
                     }
-                }, COMPLETED_ANIMATION_DISPLAY_DURATION);
-            });
-
-            // Similar logic for onReverseComplete
-            tween.eventCallback('onReverseComplete', function() {
-                if (!debuggerEnabled || !ui.menuCoreAnimationsCheckbox.checked) {
-                    activeAnimations.delete(tween);
-                    return;
-                }
-                if (!activeAnimations.has(tween)) return;
-
-                let props = activeAnimations.get(tween);
-                props.status = 'completed';
-                props.completedAt = Date.now();
-                activeAnimations.set(tween, props);
-
-                setTimeout(() => {
-                    if (activeAnimations.has(tween) && activeAnimations.get(tween).completedAt === props.completedAt) {
-                        activeAnimations.delete(tween);
-                    }
-                }, COMPLETED_ANIMATION_DISPLAY_DURATION);
-            });
+                });
+            }
         };
 
         // Function to monitor individual GSAP timelines
         const monitorTimeline = (timeline) => {
             // Only proceed if debugger is enabled AND the timelines section is tracked.
-            if (!debuggerEnabled || !ui.menuTimelinesCheckbox.checked) {
-                activeTimelines.delete(timeline);
-                return;
-            }
-
-            if (!activeTimelines.has(timeline)) {
+            if (!activeTimelines.has(timeline) && debuggerEnabled && ui.menuTimelinesCheckbox.checked) {
                 activeTimelines.set(timeline, {
                     status: 'playing',
                     completedAt: null,
+                    // Initial snapshot of static timeline properties
                     currentTime: timeline.time().toFixed(2) + 's',
                     timeScale: timeline.timeScale().toFixed(2),
                     totalDuration: timeline.totalDuration().toFixed(2) + 's',
@@ -644,72 +628,72 @@
                         onComplete: !!timeline.vars.onComplete, onStart: !!timeline.vars.onStart, onReverseComplete: !!timeline.vars.onReverseComplete
                     }
                 });
-            }
 
-            timeline.eventCallback('onUpdate', function() {
-                if (!debuggerEnabled || !ui.menuTimelinesCheckbox.checked) {
-                    activeTimelines.delete(timeline);
-                    return;
-                }
-                let props = activeTimelines.get(timeline);
-                if (!props) {
-                    props = {
-                        status: 'playing', completedAt: null,
-                        currentTime: timeline.time().toFixed(2) + 's', timeScale: timeline.timeScale().toFixed(2), totalDuration: timeline.totalDuration().toFixed(2) + 's',
-                        positionParametersUsed: (timeline.getChildren && timeline.getChildren().some(t => typeof t.position === 'string' && (t.position.includes('<') || t.position.includes('>') || t.position.includes('+=')))) || false,
-                        callbacks: { onComplete: !!timeline.vars.onComplete, onStart: !!timeline.vars.onStart, onReverseComplete: !!timeline.vars.onReverseComplete }
-                    };
+                timeline.eventCallback('onUpdate', function() {
+                    if (!debuggerEnabled || !ui.menuTimelinesCheckbox.checked) {
+                        activeTimelines.delete(timeline);
+                        return;
+                    }
+                    let props = activeTimelines.get(timeline);
+                    if (!props) {
+                        props = {
+                            status: 'playing', completedAt: null,
+                            currentTime: timeline.time().toFixed(2) + 's', timeScale: timeline.timeScale().toFixed(2), totalDuration: timeline.totalDuration().toFixed(2) + 's',
+                            positionParametersUsed: (timeline.getChildren && timeline.getChildren().some(t => typeof t.position === 'string' && (t.position.includes('<') || t.position.includes('>') || t.position.includes('+=')))) || false,
+                            callbacks: { onComplete: !!timeline.vars.onComplete, onStart: !!timeline.vars.onStart, onReverseComplete: !!timeline.vars.onReverseComplete }
+                        };
+                        activeTimelines.set(timeline, props);
+                    }
+
+                    props.status = 'playing';
+                    props.completedAt = null;
+                    props.currentTime = timeline.time().toFixed(2) + 's';
+                    props.timeScale = timeline.timeScale().toFixed(2);
                     activeTimelines.set(timeline, props);
-                }
+                });
 
-                props.status = 'playing';
-                props.completedAt = null;
-                props.currentTime = timeline.time().toFixed(2) + 's';
-                props.timeScale = timeline.timeScale().toFixed(2);
-                activeTimelines.set(timeline, props);
-            });
-
-            timeline.eventCallback('onComplete', function() {
-                if (!debuggerEnabled || !ui.menuTimelinesCheckbox.checked) {
-                    activeTimelines.delete(timeline);
-                    return;
-                }
-                if (!activeTimelines.has(timeline)) return;
-
-                let props = activeTimelines.get(timeline);
-                props.status = 'completed';
-                props.completedAt = Date.now();
-                activeTimelines.set(timeline, props);
-
-                setTimeout(() => {
-                    if (activeTimelines.has(timeline) && activeTimelines.get(timeline).completedAt === props.completedAt) {
+                timeline.eventCallback('onComplete', function() {
+                    if (!debuggerEnabled || !ui.menuTimelinesCheckbox.checked) {
                         activeTimelines.delete(timeline);
+                        return;
                     }
-                }, COMPLETED_ANIMATION_DISPLAY_DURATION);
-            });
+                    if (!activeTimelines.has(timeline)) return;
 
-            timeline.eventCallback('onReverseComplete', function() {
-                if (!debuggerEnabled || !ui.menuTimelinesCheckbox.checked) {
-                    activeTimelines.delete(timeline);
-                    return;
-                }
-                if (!activeTimelines.has(timeline)) return;
+                    let props = activeTimelines.get(timeline);
+                    props.status = 'completed';
+                    props.completedAt = Date.now();
+                    activeTimelines.set(timeline, props);
 
-                let props = activeTimelines.get(timeline);
-                props.status = 'completed';
-                props.completedAt = Date.now();
-                activeTimelines.set(timeline, props);
+                    setTimeout(() => {
+                        if (activeTimelines.has(timeline) && activeTimelines.get(timeline).completedAt === props.completedAt) {
+                            activeTimelines.delete(timeline);
+                        }
+                    }, COMPLETED_ANIMATION_DISPLAY_DURATION);
+                });
 
-                setTimeout(() => {
-                    if (activeTimelines.has(timeline) && activeTimelines.get(timeline).completedAt === props.completedAt) {
+                timeline.eventCallback('onReverseComplete', function() {
+                    if (!debuggerEnabled || !ui.menuTimelinesCheckbox.checked) {
                         activeTimelines.delete(timeline);
+                        return;
                     }
-                }, COMPLETED_ANIMATION_DISPLAY_DURATION);
-            });
+                    if (!activeTimelines.has(timeline)) return;
+
+                    let props = activeTimelines.get(timeline);
+                    props.status = 'completed';
+                    props.completedAt = Date.now();
+                    activeTimelines.set(timeline, props);
+
+                    setTimeout(() => {
+                        if (activeTimelines.has(timeline) && activeTimelines.get(timeline).completedAt === props.completedAt) {
+                            activeTimelines.delete(timeline);
+                        }
+                    }, COMPLETED_ANIMATION_DISPLAY_DURATION);
+                });
+            }
         };
 
 
-        // --- GSAP Method Overrides for Detection ---
+        // --- GSAP Method Overrides for Detection (Non-Interfering) ---
         // Store original methods
         const originalTo = gsap.to;
         const originalFrom = gsap.from;
@@ -833,8 +817,9 @@
              updateEventData('resize', { target: window });
         });
 
-        // --- Update UI Loop and Keyboard Shortcut ---
-        setInterval(updateDisplay, 100); // UI update frequency
+        // --- Update UI Loop (Independent from Data Collection) ---
+        // This interval solely updates the debugger's UI from the data Maps.
+        setInterval(updateDisplay, 100); // UI update frequency (e.g., 10 times per second)
 
         window.addEventListener('keydown', (e) => {
             if (e.key === 'D' && (e.ctrlKey || e.metaKey)) {
