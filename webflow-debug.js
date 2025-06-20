@@ -1,14 +1,14 @@
-// gsap-debugger-webflow-v4.3.2.js
-// Version: 4.3.2 — Skip zero-duration & infinite-loop tweens; expire pre-finished animations
+// gsap-debugger-webflow-v4.3.5.js
+// Version: 4.3.5 — Adds mouse position to footer
 
 (function () {
   "use strict";
 
   function initDebugger() {
-    console.log("🐛 GSAP Debugger v4.3.2 Loaded");
+    console.log("🐛 GSAP Debugger v4.3.5 Loaded");
 
     // --- CONFIGURATION ---
-    const VERSION = "4.3.2";
+    const VERSION = "4.3.5";
     const PARAM = "debug";
     const LS_KEY = "gsapDebuggerEnabled";
     const FADE_OUT_MS = 3000;
@@ -43,15 +43,24 @@
     // --- INJECT STYLES ---
     const css = `
       #gsap-debugger { position: fixed; bottom:10px; left:10px; width:auto; max-width:80%;
-        background:rgba(0,0,0,0.85); color:#fff; font:12px monospace; padding:10px;
+        background:rgba(0,0,0,0.75); color:#fff; font:12px monospace; padding:10px;
         max-height:90vh; display:flex; flex-direction:column; z-index:2147483647;
         box-shadow:0 2px 10px rgba(0,0,0,0.5);
+        border-radius: 7px;
       }
-      #gsap-debugger h4 { margin:0; font-size:16px; color:#0ff; }
-      #dbg-menu { display:flex; flex-wrap:wrap; gap:8px; margin:6px 0; }
+      #gsap-debugger h4 { margin:0; font-size:16px; color:#0f0;}
+      #dbg-menu { display:flex; flex-wrap:wrap; gap:8px; margin:6px 0; align-items: center; }
       .dbg-toggle-btn { padding:4px 8px; background:rgba(255,255,255,0.1);
         border:1px solid #777; border-radius:4px; color:#fff; font-size:12px;
         cursor:pointer; user-select:none;
+      }
+      #version-number { margin:0; font-size:12px; color:white;}
+      #heading {
+        display: flex;
+        flex-wrap: nowrap;
+        align-items: baseline; /* key line for baseline alignment */
+        gap: 5px;
+        margin-bottom: 0;
       }
       .dbg-toggle-btn.active { background:rgba(0,150,0,0.6); border-color:#0a0; }
       #dbg-content { flex:1 1 auto; display:flex; gap:8px; overflow:hidden; }
@@ -62,11 +71,12 @@
       .dbg-item { margin:4px 0; padding:4px; border-left:3px solid #0f0;
         background:rgba(255,255,255,0.05);
       }
-      .dbg-item.completed { border-color:#f90; opacity:0.6; transition:opacity 1s; }
+      .dbg-item.completed { border-color:#f90; opacity:0.8; transition:opacity 1s; }
       .dbg-target { color:#ff0; margin:0 4px; font-style:italic; }
-      #dbg-vars { font-size:10px; color:#ccc; white-space:pre-wrap; margin-top:2px; }
+      #dbg-vars { font-size:10px; color:#fff; white-space:pre-wrap; margin-top:2px; }
       #dbg-callback-log { font-size:10px; color:#0ff; }
       #dbg-scroll-pos { margin-top:6px; text-align:right; font-size:12px; color:#fff; }
+      #dbg-menu .divider { color:#777; margin:0 10px; font-size:14px; user-select:none; }
     `;
     document.head.insertAdjacentHTML("beforeend", `<style>${css}</style>`);
 
@@ -74,7 +84,7 @@
     const container = document.createElement("div");
     container.id = "gsap-debugger";
     container.innerHTML = `
-      <h4>GSAP Debugger v${VERSION}</h4>
+      <div id="heading"><h4>GSAP Debugger </h4><div id="version-number">v${VERSION}</div></div>
       <div id="dbg-menu"></div>
       <div id="dbg-content">
         <div id="dbg-list" class="dbg-section"></div>
@@ -89,18 +99,10 @@
     const listEl = container.querySelector("#dbg-list");
     const logEl = container.querySelector("#dbg-callback-log");
     const posEl = container.querySelector("#dbg-scroll-pos");
-    const features = [
-      "callbacks",
-      "vars",
-      "hold",
-      "stEvents",
-      "stMarkers",
-      "dom",
-    ];
+    const features = ["callbacks", "vars", "stEvents", "stMarkers", "dom"];
     const labels = {
       callbacks: "Trace Callbacks",
       vars: "Inspect Vars",
-      hold: "Hold",
       stEvents: "ST Events",
       stMarkers: "ST Markers",
       dom: "DOM Observe",
@@ -129,6 +131,39 @@
       });
       menuEl.appendChild(btn);
     });
+    // Separator before function buttons
+    const sep = document.createElement("span");
+    sep.textContent = "|";
+    sep.className = "divider";
+    menuEl.appendChild(sep);
+
+    // Clear button
+    const clearBtn = document.createElement("button");
+    clearBtn.id = "dbg-clear-btn";
+    clearBtn.className = "dbg-toggle-btn";
+    clearBtn.textContent = "Clear";
+    clearBtn.addEventListener("click", () => {
+      listEl.innerHTML = "";
+      logEl.innerHTML = "";
+    });
+    menuEl.appendChild(clearBtn);
+
+    // Hold button (now syncs state.hold)
+    state.hold = JSON.parse(
+      localStorage.getItem("gsapDebugger_hold") || "false"
+    );
+    const holdBtn = document.createElement("button");
+    holdBtn.id = "dbg-hold-btn";
+    holdBtn.className = "dbg-toggle-btn";
+    holdBtn.textContent = `Hold: ${state.hold ? "ON" : "OFF"}`;
+    if (state.hold) holdBtn.classList.add("active");
+    holdBtn.addEventListener("click", () => {
+      state.hold = !state.hold;
+      localStorage.setItem("gsapDebugger_hold", JSON.stringify(state.hold));
+      holdBtn.classList.toggle("active", state.hold);
+      holdBtn.textContent = `Hold: ${state.hold ? "ON" : "OFF"}`;
+    });
+    menuEl.appendChild(holdBtn);
 
     function handleToggle(key, on) {
       if (key === "callbacks" && !on) logEl.innerHTML = "";
@@ -278,10 +313,6 @@
         records.forEach((m) => {
           const t = m.target;
           if (ui.contains(t)) return;
-          for (const n of m.addedNodes || [])
-            if (n.nodeType === 1 && ui.contains(n)) return;
-          for (const n of m.removedNodes || [])
-            if (n.nodeType === 1 && ui.contains(n)) return;
           enqueueLog(
             `[DOM] ${getElementIdentifier(t)} ${m.type}` +
               (m.attributeName ? ` ${m.attributeName}` : "")
@@ -300,7 +331,14 @@
       domObserver = null;
     }
 
-    // --- RENDER LOOP ---
+    // --- RENDER LOOP + MOUSE TRACKING ---
+    let mouseX = 0,
+      mouseY = 0;
+    window.addEventListener("mousemove", (e) => {
+      mouseX = e.clientX;
+      mouseY = e.clientY;
+    });
+
     function renderLoop() {
       listEl.innerHTML = "";
       tracked.forEach((info) => {
@@ -321,7 +359,7 @@
         d.innerHTML = html;
         listEl.appendChild(d);
       });
-      posEl.textContent = `ScrollY: ${window.scrollY}px`;
+      posEl.textContent = `ScrollY: ${window.scrollY}px | Mouse: X ${mouseX}, Y ${mouseY}`;
     }
     if (window.gsap && gsap.ticker && typeof gsap.ticker.add === "function")
       gsap.ticker.add(renderLoop);
@@ -347,9 +385,6 @@
         },
       });
       if (window.ScrollTrigger) {
-        try {
-          orig.registerPlugin(ScrollTrigger);
-        } catch {}
         ScrollTrigger.addEventListener("refresh", attachSTEventWrappers);
       }
     }
