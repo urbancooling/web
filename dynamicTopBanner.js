@@ -1,27 +1,26 @@
 Webflow.push(function () {
   // GSAP Powered sticky top-of-the-page dynamic banner and hide on scroll down, show on scroll up.
   // This script now also controls an OPTIONAL secondary sticky element: #sticky-filter-wrapper
-  // VERSION: 3.1 (All console messages controlled by external debugger)
+  // VERSION: 3.2 (Conditional filter control for desktop only)
 
-  let isInitialized = false;
-
-  // The 'debounce' function is loaded from your separate 'utils.js' script.
+  let isInitialized = false; // The 'debounce' function is loaded from your separate 'utils.js' script.
 
   function initNavScroll() {
-    if (isInitialized) return;
+    if (isInitialized) return; // Check for debug mode using the centralized utility function.
 
-    // Check for debug mode using the centralized utility function.
     const isDebugMode = window.siteUtils && window.siteUtils.isDebugMode();
-    
-    // --- Get CORE elements required on every page ---
+    // --- ADDED: Helper function to check if we are in desktop view ---
+    // Webflow's tablet breakpoint is 991px. Desktop is 992px and above.
+    const isDesktopView = () => window.matchMedia("(min-width: 992px)").matches; // --- Get CORE elements required on every page ---
     const banner = document.getElementById("top-banner");
     const navwrap = document.getElementById("nav-wrap");
-    const pageWrapper = document.querySelector(".page_wrapper");
+    const pageWrapper = document.querySelector(".page_wrapper"); // Abort if the absolute core elements are missing.
 
-    // Abort if the absolute core elements are missing.
     if (!banner || !navwrap || !pageWrapper) {
       if (isDebugMode) {
-        console.warn("Aborting script: Core elements were not found. (Requires: #top-banner, #nav-wrap, .page_wrapper)");
+        console.warn(
+          "Aborting script: Core elements were not found. (Requires: #top-banner, #nav-wrap, .page_wrapper)"
+        );
       }
       return;
     }
@@ -31,43 +30,47 @@ Webflow.push(function () {
     isInitialized = true;
 
     if (isDebugMode) {
-      console.log("Sticky nav script initialized. Page will snap into position on load.");
-      if(filterWrapper) {
-          console.log("Optional sticky filter element found and is being controlled.");
+      console.log(
+        "Sticky nav script initialized. Page will snap into position on load."
+      );
+      if (filterWrapper) {
+        console.log(
+          "Optional sticky filter element found. It will be controlled on desktop viewports only."
+        );
       }
     }
 
-    const STICKY_OFFSET = 32;
+    const STICKY_OFFSET = 32; // This function now instantly sets all positions.
 
-    // This function now instantly sets all positions.
     function updatePositions() {
-      const navWrapHeight = navwrap.offsetHeight;
+      const navWrapHeight = navwrap.offsetHeight; // --- MODIFIED: This section now checks the viewport width ---
 
-      // Instantly set the filter's sticky top position if it exists.
       if (filterWrapper) {
+        // Only apply styles if we're on a desktop-sized screen
+        if (isDesktopView()) {
           const filterStickyTopValue = navWrapHeight + STICKY_OFFSET;
           filterWrapper.style.top = `${filterStickyTopValue}px`;
-      }
+        } else {
+          // On tablet/mobile, remove the inline style so CSS can take over.
+          filterWrapper.style.top = "";
+        }
+      } // Instantly set padding on the wrapper to reserve space.
 
-      // Instantly set padding on the wrapper to reserve space.
       pageWrapper.style.paddingTop = `${navWrapHeight}px`;
-    }
+    } // --- State Variables ---
 
-    // --- State Variables ---
-    let bannerHidden = false;   
-    let isAnimating = false;    
-    let scrollDelta = 0;        
+    let bannerHidden = false;
+    let isAnimating = false;
+    let scrollDelta = 0;
     let lastScroll = window.pageYOffset;
-    let lastDirection = null;   
+    let lastDirection = null;
     const threshold = 200;
 
     function getBannerHeight() {
       return banner.getBoundingClientRect().height;
     }
-    
-    gsap.set(navwrap, { y: 0 });
+    gsap.set(navwrap, { y: 0 }); // The main function that runs on every animation frame to check scroll position.
 
-    // The main function that runs on every animation frame to check scroll position.
     function checkScroll() {
       const currentScroll = window.pageYOffset;
       const direction = currentScroll > lastScroll ? "down" : "up";
@@ -88,12 +91,21 @@ Webflow.push(function () {
       if (currentScroll < 80) {
         scrollDelta = 0;
         if (bannerHidden) {
-            bannerHidden = false;
-            gsap.to(navwrap, { y: 0, duration: 0.3, ease: "power2.inOut", force3D: true });
-            if(filterWrapper){
-                const newTop = navwrap.offsetHeight + STICKY_OFFSET;
-                gsap.to(filterWrapper, { top: newTop, duration: 0.3, ease: "power2.inOut" });
-            }
+          bannerHidden = false;
+          gsap.to(navwrap, {
+            y: 0,
+            duration: 0.3,
+            ease: "power2.inOut",
+            force3D: true,
+          }); // --- MODIFIED: Check viewport before animating filter ---
+          if (filterWrapper && isDesktopView()) {
+            const newTop = navwrap.offsetHeight + STICKY_OFFSET;
+            gsap.to(filterWrapper, {
+              top: newTop,
+              duration: 0.3,
+              ease: "power2.inOut",
+            });
+          }
         }
         requestAnimationFrame(checkScroll);
         return;
@@ -101,11 +113,15 @@ Webflow.push(function () {
 
       if (!isAnimating) {
         if (direction === "down" && !bannerHidden && scrollDelta > threshold) {
-          isAnimating = true;
-          
-          if(filterWrapper){
-              const topWhenHidden = (navwrap.offsetHeight - getBannerHeight()) + STICKY_OFFSET;
-              gsap.to(filterWrapper, { top: topWhenHidden, duration: 0.3, ease: "power2.inOut" });
+          isAnimating = true; // --- MODIFIED: Check viewport before animating filter ---
+          if (filterWrapper && isDesktopView()) {
+            const topWhenHidden =
+              navwrap.offsetHeight - getBannerHeight() + STICKY_OFFSET;
+            gsap.to(filterWrapper, {
+              top: topWhenHidden,
+              duration: 0.3,
+              ease: "power2.inOut",
+            });
           }
 
           gsap.to(navwrap, {
@@ -124,11 +140,15 @@ Webflow.push(function () {
         }
 
         if (direction === "up" && bannerHidden && scrollDelta > threshold) {
-          isAnimating = true;
+          isAnimating = true; // --- MODIFIED: Check viewport before animating filter ---
 
-          if(filterWrapper){
-              const topWhenVisible = navwrap.offsetHeight + STICKY_OFFSET;
-              gsap.to(filterWrapper, { top: topWhenVisible, duration: 0.3, ease: "power2.inOut" });
+          if (filterWrapper && isDesktopView()) {
+            const topWhenVisible = navwrap.offsetHeight + STICKY_OFFSET;
+            gsap.to(filterWrapper, {
+              top: topWhenVisible,
+              duration: 0.3,
+              ease: "power2.inOut",
+            });
           }
 
           gsap.to(navwrap, {
@@ -149,19 +169,16 @@ Webflow.push(function () {
       requestAnimationFrame(checkScroll);
     }
 
-    requestAnimationFrame(checkScroll);
+    requestAnimationFrame(checkScroll); // Use a small timeout for the initial positioning to ensure the browser has calculated the final layout.
 
-    // Use a small timeout for the initial positioning to ensure the browser has calculated the final layout.
-    setTimeout(updatePositions, 100);
+    setTimeout(updatePositions, 100); // Call the debounce function from the shared utility library.
 
-    // Call the debounce function from the shared utility library.
     const debouncedUpdate = window.siteUtils.debounce(updatePositions, 250);
-    window.addEventListener('resize', debouncedUpdate);
-  }
+    window.addEventListener("resize", debouncedUpdate);
+  } // --- Event Listeners to initialize the script on page load and on Webflow's page changes ---
 
-  // --- Event Listeners to initialize the script on page load and on Webflow's page changes ---
   initNavScroll();
-  document.addEventListener("wfPageView", function() {
+  document.addEventListener("wfPageView", function () {
     isInitialized = false;
     initNavScroll();
   });
